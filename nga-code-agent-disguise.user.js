@@ -284,15 +284,16 @@
 
     /* 不可见字符清理 + 去除空首行（NGA 会塞 ZWSP） */
     const cleanText = s => {
-        const lines = s.replace(/​/g, '').split('\n').map(l => l.trim());
-        const invis = /^[\s  ]*$/;
+        // ZWSP (U+200B) 用 fromCharCode 引用，源码里不放不可见字符
+        const lines = s.split(String.fromCharCode(0x200b)).join('').split('\n').map(l => l.trim());
+        const invis = /^\s*$/;   // JS \s 本身覆盖 U+00A0 / U+3000
         while (lines.length && invis.test(lines[0])) lines.shift();
         while (lines.length && invis.test(lines[lines.length - 1])) lines.pop();
         return lines.join('\n').replace(/\n{3,}/g, '\n\n');
     };
 
     /* 正文抽取：返回 { text, imgs }。
-       显示图片时，正文图替换为占位 token  N （N = imgs 下标），
+       显示图片时，正文图替换为占位 token %%IMGN%%（N = imgs 下标），
        渲染阶段按 token 把图片插回原始位置，不再全部堆到文字后面。 */
     const contentText = (node, showImg) => {
         if (!node) return { text: '', imgs: [] };
@@ -311,7 +312,7 @@
                 const o = imgSrc(i);
                 if (!o.main) { i.remove(); return; }
                 imgs.push(o);
-                i.replaceWith(`${imgs.length - 1}`);
+                i.replaceWith(`%%IMG${imgs.length - 1}%%`);
             } else {
                 i.replaceWith('[image]');
             }
@@ -516,9 +517,9 @@
     /* 引用块：按嵌套深度缩进 */
     const Quote = ({ q }) => html`<div class="cad-qline" style=${'margin-left:' + (q.depth * 14) + 'px'}>▎${q.text}</div>`;
 
-    /* 正文：按 N token 把图片插回原始位置（Preact 自动转义文本） */
+    /* 正文：按 %%IMGN%% token 把图片插回原始位置（Preact 自动转义文本） */
     const PostBody = ({ p, maxLines }) => {
-        const parts = truncate(p.text, maxLines).split(/(\d+)/);
+        const parts = truncate(p.text, maxLines).split(/%%IMG(\d+)%%/);
         return html`<div class="cad-text cad-line">${parts.map((part, i) =>
             i % 2 ? (p.imgs[+part] ? html`<${Img} o=${p.imgs[+part]} />` : null) : part)}</div>`;
     };
