@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NGA Code Agent 伪装（Claude Code / Codex）
 // @namespace    https://github.com/zhaoyifan
-// @version      2.1.1
+// @version      2.2.0
 // @description  将 NGA 页面伪装成 Claude Code / Codex CLI 终端会话，旁人看来你在用 code agent。` 一键切换，? 帮助，输入栏可敲命令（search: 搜索 · board 切版 · help 查看全部），vim 键位。渲染层 Preact 重构
 // @author       zhaoyifan
 // @match        *://bbs.nga.cn/*
@@ -26,7 +26,7 @@
         get opOnly(){ return GM_getValue('cad_op_only', false); },   // 仅楼主
         get expand(){ return GM_getValue('cad_expand', false); },    // 展开全部截断楼层
         get vim()   { return GM_getValue('cad_vim', true); },        // vim 键位
-        get autopage(){ return GM_getValue('cad_autopage', true); }, // 滚到底自动翻页
+        get autopage(){ return GM_getValue('cad_autopage', true); }, // 滚到底自动加载下一页
         set on(v)    { GM_setValue('cad_on', v); },
         set style(v) { GM_setValue('cad_style', v); },
         set mode(v)  { GM_setValue('cad_mode', v); },
@@ -197,14 +197,12 @@
     .cad-themeswitch { cursor:pointer; color:var(--faint); }
     .cad-themeswitch:hover { color:var(--accent2); }
 
-    /* 自动翻页倒计时浮标（醒目居中，点击取消） */
-    .cad-autopage {
-        position:absolute; left:50%; bottom:64px; transform:translateX(-50%);
-        padding:6px 16px; border:1px solid var(--accent); border-radius:6px;
-        background:var(--bg); color:var(--accent2); font-weight:600; cursor:pointer;
-        box-shadow:0 2px 12px rgba(0,0,0,.25); user-select:none; z-index:5;
-        white-space:nowrap;
+    /* 无限滚动：分页分隔线 */
+    .cad-pagesep {
+        color:var(--faint); margin:12px 0 2px; display:flex; align-items:center; gap:10px;
+        user-select:none;
     }
+    .cad-pagesep::before, .cad-pagesep::after { content:''; flex:1; border-top:1px dashed var(--border); }
 
     /* 窄屏适配 */
     @media (max-width:760px) {
@@ -258,12 +256,14 @@
     let inputEl = null;          // 真实输入框（InputBar 渲染后引用）
     let lastSig = '';
     let lastData = null;
+    let dataHref = '';           // lastData 锚定的 URL（无限滚动合并判断）
     let typed = '';              // 输入栏受控文本
     let focused = false;         // 输入栏是否聚焦（控制假光标显示）
     let gTs = 0;                 // vim gg 等待窗口
-    let autoPageTimer = null;    // 自动翻页倒计时定时器
-    let autoPageLeft = 0;        // 自动翻页剩余秒数（0 = 未挂起）
-    let autoPageLatch = false;   // 取消/触发后上闩，翻页前不再重新武装
+    let autoPageLoading = false; // 下一页抓取中
+    let autoPageError = false;   // 上次抓取失败（显示重试入口）
+    let nextPageUrl = null;      // 下一页 URL（refresh 时提取，append 后更新）
+    let loadedPages = new Set(); // 已加载页 URL（防循环）
     let locRenderTimer = null;   // 属地渲染合并定时器
     const echoLog = [];          // { cmd, out: [htmlLine] } — 命令回显 scrollback
     const cmdHistory = [];
@@ -352,11 +352,12 @@
     /* 标题去站名后缀 */
     const cleanTitle = t => t.replace(/[\s\-_]*(NGA玩家社区|艾泽拉斯国家地理论坛|NGA)\s*$/i, '').trim();
 
-    const extractTopics = () => {
-        const rows = [...document.querySelectorAll('.topicrow')];
+    const extractTopics = (doc = document, baseUrl = location.href) => {
+        const abs = u => { try { return new URL(u, baseUrl).href; } catch { return u || '#'; } };
+        const rows = [...doc.querySelectorAll('.topicrow')];
         if (!rows.length) return null;
         const board = cleanTitle(
-            text(document.querySelector('#m_nav .nav_link:last-child, .nav_link:last-child'))
+            text(doc.querySelector('#m_nav .nav_link:last-child, .nav_link:last-child'))
             || realTitle || document.title
         ) || 'board';
         return {
@@ -374,7 +375,7 @@
                         .sort((x, y) => y.textContent.trim().length - x.textContent.trim().length)[0];
                 }
                 const title = text(titleEl) || text(a);
-                const href = (a && a.href) || (titleEl && titleEl.href) || '#';
+                const href = abs((a && a.getAttribute('href')) || (titleEl && titleEl.getAttribute('href')) || '');
                 // c3 = 作者 + 发帖时间，c4 = 最后回复时间 + 回复人，需分开取
                 const author = text(r.querySelector('.c3 .author')) || text(r.querySelector('.c3 a'));
                 const postDate = text(r.querySelector('.c3 .postdate'));
@@ -430,8 +431,8 @@
     };
 
     /* 按「热点回复」文字定位热楼容器（NGA 该模块 id/class 不稳定） */
-    const findHotBoxes = () => {
-        const heads = [...document.querySelectorAll('div,span,td,b')].filter(el => {
+    const findHotBoxes = (doc = document) => {
+        const heads = [...doc.querySelectorAll('div,span,td,b')].filter(el => {
             const t = el.textContent.trim();
             return t.startsWith('热点回复') && t.length < 12;
         });
@@ -445,39 +446,43 @@
         return [];
     };
 
-    const extractPosts = () => {
-        const allBoxes = [...document.querySelectorAll('.forumbox.postbox')];
+    /* doc 参数支持解析抓取到的下一页文档；opUidOverride 让追加页沿用首楼的楼主判定 */
+    const extractPosts = (doc = document, opUidOverride) => {
+        const allBoxes = [...doc.querySelectorAll('.forumbox.postbox')];
         if (!allBoxes.length) return null;
-        const elTitle = text(document.querySelector('#toppedtopic .topic, .catetitle, h1 .topic'));
+        const elTitle = text(doc.querySelector('#toppedtopic .topic, .catetitle, h1 .topic'));
         const title = cleanTitle(elTitle || realTitle || document.title);
         // 热点楼层先从主列表剔除，避免污染楼主判定与楼层列表
-        const hotBoxes = findHotBoxes();
+        const hotBoxes = findHotBoxes(doc);
         const boxes = allBoxes.filter(b => !hotBoxes.some(hb => hb === b || hb.contains(b)));
         if (!boxes.length) return null;
-        // 首楼 UID 即楼主
-        const opUid = text(boxes[0].querySelector('a[name="uid"]'));
+        // 首楼 UID 即楼主（追加页用 override）
+        const opUid = opUidOverride !== undefined ? opUidOverride : text(boxes[0].querySelector('a[name="uid"]'));
         const posts = boxes.map((b, i) => parsePost(b, i, opUid));
-        // 1 楼正文首行常与标题重复，去掉
-        if (posts.length && posts[0].text.startsWith(title)) {
+        // 1 楼正文首行常与标题重复，去掉（仅当前页首楼）
+        if (opUidOverride === undefined && posts.length && posts[0].text.startsWith(title)) {
             posts[0].text = cleanText(posts[0].text.slice(title.length));
         }
-        const hot = hotBoxes.slice(0, 5).map((b, i) => parsePost(b, i, opUid)).filter(p => p.text || p.imgs.length);
+        // 热点回复只取当前页，追加页不重复展示
+        const hot = doc === document
+            ? hotBoxes.slice(0, 5).map((b, i) => parsePost(b, i, opUid)).filter(p => p.text || p.imgs.length)
+            : [];
         return { kind: 'posts', title, posts, hot };
     };
 
     /* 分页链接抽取：只取顶/底翻页条，且必须指向当前页面类型（防止抓到帖子行内迷你分页） */
-    const extractPager = () => {
+    const extractPager = (doc = document, baseUrl = location.href) => {
         const isRead = location.pathname.includes('read');
         const pathKey = isRead ? 'read.php' : 'thread.php';
         const curTid = new URLSearchParams(location.search).get('tid');
-        const links = [...document.querySelectorAll('#m_pbtnbtm a[href], #pagebbtm a[href], #m_pbtntop a[href], #pagebbtop a[href], #m_threads > .uitxt1 a[href]')];
+        const links = [...doc.querySelectorAll('#m_pbtnbtm a[href], #pagebbtm a[href], #m_pbtntop a[href], #pagebbtop a[href], #m_threads > .uitxt1 a[href]')];
         const seen = new Set();
         const out = [];
         for (const a of links) {
             const t = a.textContent.trim();
             if (!/^(\d{1,4}|下一页|下页|上一页|上页|>{1,2}|<{1,2}|尾页|首页)$/.test(t)) continue;
             let u;
-            try { u = new URL(a.href, location.href); } catch { continue; }
+            try { u = new URL(a.getAttribute('href') || '', baseUrl); } catch { continue; }
             if (!u.pathname.includes(pathKey)) continue;
             if (isRead && curTid && u.searchParams.get('tid') !== curTid) continue;
             const key = (u.searchParams.get('page') || '') + '|' + t;
@@ -602,7 +607,7 @@
             <div>· 底部输入 <b>help</b> 查看全部命令 · <b>Tab</b> 补全</div>
             <div>· <b>search: 关键词</b> 搜索本版 · <b>search: -g 关键词</b> 全站搜索</div>
             <div>· 顶部 <b>boards:</b> 栏点击切换收藏板块 · <b>[+]</b> 收藏当前版</div>
-            <div class="dim">滚到底自动翻页（autopage 开关） · vim j/k/gg/G · / 搜索 · \` 退出伪装</div>
+            <div class="dim">滚到底自动加载下一页（autopage 开关） · vim j/k/gg/G · / 搜索 · \` 退出伪装</div>
         </div>
     </div>`;
 
@@ -611,52 +616,58 @@
 
     const ClaudeView = ({ data }) => {
         const cwd = cwdFor(data);
-        if (data.kind === 'topics') return html`
+        if (data.kind === 'topics') {
+            let tn = 0;
+            return html`
         <${Welcome} cwd=${cwd} />
         <${CmdLine} cwd=${cwd} cmd="ls" />
-        <div class="cad-line"><span class="cad-sect">${data.board}</span> <span class="cad-faint">· ${data.topics.length} topics</span></div>
-        ${data.topics.map((t, i) => html`<${TopicRow} t=${t} i=${i} />`)}
+        <div class="cad-line"><span class="cad-sect">${data.board}</span> <span class="cad-faint">· ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics</span></div>
+        ${data.topics.map(t => t.sep ? html`<${PageSep} label=${t.sep} />` : html`<${TopicRow} t=${t} i=${tn++} />`)}
         <${Pager} pager=${data.pager} />`;
+        }
         if (data.kind === 'posts') {
-            const visible = store.opOnly ? data.posts.filter(p => p.isOP) : data.posts;
+            const visible = store.opOnly ? data.posts.filter(p => p.isOP || p.sep) : data.posts;
             return html`
         <${CmdLine} cwd=${cwd} cmd=${'open "' + data.title + '"'} />
-        <div class="cad-line cad-faint">thread: ${data.title} · ${data.posts.length} replies${store.opOnly ? ' · OP only' : ''}</div>
+        <div class="cad-line cad-faint">thread: ${data.title} · ${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} replies${store.opOnly ? ' · OP only' : ''}</div>
         ${(!store.opOnly && data.hot && data.hot.length) ? html`
         <div class="cad-line" style="margin-top:6px"><span class="cad-sect">hot replies</span></div>
         ${data.hot.map(p => html`<${PostBlock} p=${p} maxLines=${14} />`)}` : null}
         <div class="cad-line" style="margin-top:6px"><span class="cad-sect">all replies</span></div>
-        ${visible.map(p => html`<${PostBlock} p=${p} maxLines=${14} />`)}
+        ${visible.map(p => p.sep ? html`<${PageSep} label=${p.sep} />` : html`<${PostBlock} p=${p} maxLines=${14} />`)}
         <${Pager} pager=${data.pager} />
-        <div class="cad-line cad-faint" style="margin-top:8px">✻ Rendered ${visible.length} replies · next page / go page N 翻页 · ctrl+o ${store.expand ? '收起' : '展开'}截断</div>`;
+        <div class="cad-line cad-faint" style="margin-top:8px">✻ Rendered ${visible.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} replies · next page / go page N 翻页 · ctrl+o ${store.expand ? '收起' : '展开'}截断</div>`;
         }
         return html`<div class="cad-line cad-faint">⏵⏵ 此页面暂无可伪装的帖子/板块数据 — \` 退出伪装，F5 重试</div>`;
     };
 
     const CodexView = ({ data }) => {
         const cwd = cwdFor(data);
-        if (data.kind === 'topics') return html`
+        if (data.kind === 'topics') {
+            let tn = 0;
+            return html`
         <${CodexBanner} />
         <div class="cad-blocktag">user</div>
         <div class="cad-line">列出板块「${data.board}」的帖子</div>
         <div class="cad-blocktag">codex</div>
-        <div class="cad-line cad-faint">cwd: ${cwd} · ${data.topics.length} topics</div>
-        ${data.topics.map((t, i) => html`<${TopicRow} t=${t} i=${i} bullet=${true} />`)}
+        <div class="cad-line cad-faint">cwd: ${cwd} · ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics</div>
+        ${data.topics.map(t => t.sep ? html`<${PageSep} label=${t.sep} />` : html`<${TopicRow} t=${t} i=${tn++} bullet=${true} />`)}
         <${Pager} pager=${data.pager} />
         <div class="cad-line cad-faint" style="margin-top:8px">Working… (esc to interrupt)</div>`;
+        }
         if (data.kind === 'posts') {
-            const visible = store.opOnly ? data.posts.filter(p => p.isOP) : data.posts;
+            const visible = store.opOnly ? data.posts.filter(p => p.isOP || p.sep) : data.posts;
             return html`
         <${CodexBanner} />
         <div class="cad-blocktag">user</div>
         <div class="cad-line">打开帖子「${data.title}」</div>
         <div class="cad-blocktag">codex</div>
-        <div class="cad-line cad-faint">${data.posts.length} replies${store.opOnly ? ' · OP only' : ''} · cwd: ${cwd}</div>
+        <div class="cad-line cad-faint">${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} replies${store.opOnly ? ' · OP only' : ''} · cwd: ${cwd}</div>
         ${(!store.opOnly && data.hot && data.hot.length) ? html`
         <div class="cad-line" style="margin-top:6px"><span class="cad-sect">hot replies</span></div>
         ${data.hot.map(p => html`<${PostBlock} p=${p} maxLines=${12} />`)}` : null}
         <div class="cad-line" style="margin-top:6px"><span class="cad-sect">all replies</span></div>
-        ${visible.map(p => html`<${PostBlock} p=${p} maxLines=${12} />`)}
+        ${visible.map(p => p.sep ? html`<${PageSep} label=${p.sep} />` : html`<${PostBlock} p=${p} maxLines=${12} />`)}
         <${Pager} pager=${data.pager} />
         <div class="cad-line cad-faint" style="margin-top:8px">Working… (esc to interrupt)</div>`;
         }
@@ -756,9 +767,18 @@
         <span class="seg">${new Date().toTimeString().slice(0, 5)}</span>
     </div>`;
 
-    /* 自动翻页倒计时浮标：醒目居中显示，点击取消 */
-    const AutoPageBadge = () => autoPageLeft ? html`
-    <div class="cad-autopage" onClick=${() => cancelAutoPage()}>⏵⏵ ${autoPageLeft}s 后自动翻到下一页 · 上滚 / 按键 / 点击取消</div>` : null;
+    /* 无限滚动：分页分隔标记 */
+    const PageSep = ({ label }) => html`<div class="cad-pagesep">${label}</div>`;
+
+    /* 无限滚动状态行：加载中 / 失败重试 / 到底（仅无限滚动已追加过时显示） */
+    const AutoLoadState = () => {
+        if (autoPageLoading) return html`<div class="cad-line cad-faint" style="margin-top:6px">⏵⏵ 正在加载下一页…</div>`;
+        if (autoPageError) return html`<div class="cad-line" style="margin-top:6px"><span class="cad-pagelink" onClick=${() => loadNextPage()}>加载下一页失败 · 点击重试</span></div>`;
+        const list = lastData && (lastData.posts || lastData.topics);
+        if (store.autopage && !nextPageUrl && list && list.some(x => x.sep))
+            return html`<div class="cad-line cad-faint" style="margin-top:6px">── 已到最后一页 ──</div>`;
+        return null;
+    };
 
     const App = () => {
         const data = lastData || { kind: 'idle' };
@@ -767,11 +787,11 @@
         <div class="cad-body" id="cad__body" ref=${el => { bodyEl = el; }} onScroll=${onBodyScroll}>
             <${BoardsBar} />
             ${store.style === 'claude' ? html`<${ClaudeView} data=${data} />` : html`<${CodexView} data=${data} />`}
+            <${AutoLoadState} />
             <${EchoLog} />
         </div>
         <${InputBar} />
-        <${StatusBar} />
-        <${AutoPageBadge} />`;
+        <${StatusBar} />`;
     };
 
     /* 全量 render（Preact diff 保住 DOM/滚动/焦点）；URL 变化（pjax 翻页）时回滚到顶部 */
@@ -781,62 +801,84 @@
         const hrefChanged = location.href !== lastHref;
         lastHref = location.href;
         if (hrefChanged) {
-            autoPageLatch = false;                 // 翻页后解除闩锁
-            if (autoPageTimer) {
-                clearInterval(autoPageTimer);
-                autoPageTimer = null;
-                autoPageLeft = 0;
-            }
+            autoPageError = false;
+            autoPageLoading = false;
+            loadedPages = new Set([location.href]);
         }
         preactRender(html`<${App} />`, root);
         if (hrefChanged && bodyEl) bodyEl.scrollTop = 0;
     };
     const syncChrome = () => renderApp();
 
-    /* ================= 自动翻页 ================= */
-    /* 滚到底停留 6s 自动下一页；上滚 / 任意全局按键 / 点击浮标取消并上闩，
-       上闩后本页不再自动武装（翻页后自动解除）。不足一屏不触发 */
-    const hasNextPage = () => !!(lastData && lastData.pager && lastData.pager.find(l => /^(下一页|下页|>{1,2})$/.test(l.t)));
+    /* ================= 无限滚动（滚到底自动抓取下一页，内容接在下方） ================= */
+    const findNextUrl = pager => {
+        const l = (pager || []).find(x => /^(下一页|下页|>{1,2})$/.test(x.t));
+        return l ? l.href : null;
+    };
+    /* 距底 600px 即触发（提前抓取，滚动不中断） */
     const nearBottom = () => bodyEl
-        && bodyEl.scrollHeight > bodyEl.clientHeight + 100
-        && bodyEl.scrollTop + bodyEl.clientHeight >= bodyEl.scrollHeight - 80;
-    const disarmAutoPage = () => {
-        if (autoPageTimer) {
-            clearInterval(autoPageTimer);
-            autoPageTimer = null;
-        }
-        if (autoPageLeft) {
-            autoPageLeft = 0;
-            renderApp();
-        }
+        && bodyEl.scrollTop + bodyEl.clientHeight >= bodyEl.scrollHeight - 600;
+
+    /* 把抓取到的下一页内容追加到当前数据（带分页分隔标记），并更新 nextPageUrl 供链式加载 */
+    const appendPage = (doc, pageUrl) => {
+        let pageNo = 0;
+        try { pageNo = +(new URL(pageUrl).searchParams.get('page') || 0); } catch { }
+        const label = pageNo ? `page ${pageNo}` : 'next page';
+        loadedPages.add(pageUrl);
+        if (lastData.kind === 'posts') {
+            const opUid = lastData.posts.length ? lastData.posts[0].uid : undefined;
+            const data = extractPosts(doc, opUid);
+            // 防重复：抓回的楼层与已有楼层重叠即视为到底
+            if (!data || !data.posts.length
+                || lastData.posts.some(p => !p.sep && p.head === data.posts[0].head)) {
+                nextPageUrl = null;
+                return;
+            }
+            lastData.posts.push({ sep: label });
+            lastData.posts.push(...data.posts);
+        } else if (lastData.kind === 'topics') {
+            const data = extractTopics(doc, pageUrl);
+            if (!data || !data.topics.length
+                || lastData.topics.some(t => !t.sep && t.href === data.topics[0].href)) {
+                nextPageUrl = null;
+                return;
+            }
+            lastData.topics.push({ sep: label });
+            lastData.topics.push(...data.topics);
+        } else return;
+        const u = findNextUrl(extractPager(doc, pageUrl));
+        nextPageUrl = (u && !loadedPages.has(u)) ? u : null;
+        ensureLocs();   // 为追加楼层的 uid 预取属地
     };
-    const cancelAutoPage = () => {   // 用户主动取消：上闩
-        autoPageLatch = true;
-        disarmAutoPage();
-    };
-    const armAutoPage = () => {
-        if (!store.autopage || autoPageTimer || autoPageLatch || !hasNextPage() || !nearBottom()) return;
-        autoPageLeft = 6;
+
+    const loadNextPage = () => {
+        if (autoPageLoading || !nextPageUrl || !lastData || lastData.kind === 'idle') return;
+        autoPageLoading = true;
+        autoPageError = false;
+        const fetchUrl = nextPageUrl;
+        const hrefAtStart = location.href;
         renderApp();
-        autoPageTimer = setInterval(() => {
-            if (!store.autopage || !nearBottom()) {
-                disarmAutoPage();
-                return;
-            }
-            autoPageLeft -= 1;
-            if (autoPageLeft <= 0) {
-                autoPageLatch = true;    // 触发后也上闩，防止 pjax 场景连续翻页
-                disarmAutoPage();
-                pageNav(1);
-                return;
-            }
-            renderApp();
-        }, 1000);
+        fetch(fetchUrl, { credentials: 'include' })
+            .then(r => r.text())
+            .then(txt => {
+                autoPageLoading = false;
+                if (location.href !== hrefAtStart) return;   // 抓取期间已翻页，丢弃
+                appendPage(new DOMParser().parseFromString(txt, 'text/html'), fetchUrl);
+                renderApp();
+                maybeAutoLoad();   // 追加后仍贴近底部（短页）时链式补齐
+            })
+            .catch(() => {
+                autoPageLoading = false;
+                autoPageError = true;
+                renderApp();
+            });
     };
-    const onBodyScroll = () => {
-        if (nearBottom()) armAutoPage();
-        else if (autoPageTimer) cancelAutoPage();   // 武装期间上滚 = 取消
+
+    const maybeAutoLoad = () => {
+        if (!store.autopage || autoPageLoading || autoPageError || !nextPageUrl) return;
+        if (nearBottom()) loadNextPage();
     };
+    const onBodyScroll = () => maybeAutoLoad();
 
     /* ================= 命令层 ================= */
     /* 回显行 HTML 串（内容一律先 esc 再拼） */
@@ -852,11 +894,11 @@
         line('<b>翻页 / 跳转</b>', 'cad-sect'),
         line(esc('next page / prev page 下/上一页（帖子与列表通用）'), 'cad-dim'),
         line(esc('go page <n>           跳到第 n 页 · top 回顶部'), 'cad-dim'),
-        line(esc('autopage              滚到底停留 6s 自动翻页（上滚/按键/点击取消）'), 'cad-dim'),
+        line(esc('autopage              滚到底自动加载下一页（无限滚动）'), 'cad-dim'),
         line(esc('ls                    列出当前内容 · open <n> 打开第 n 帖'), 'cad-dim'),
         line('<b>显示 / 开关</b>', 'cad-sect'),
         line(esc('theme · claude/codex · dark/light   主题切换'), 'cad-dim'),
-        line(esc('img · op · expand · vim · autopage  图片/只看楼主/展开截断/vim/自动翻页'), 'cad-dim'),
+        line(esc('img · op · expand · vim · autopage  图片/只看楼主/展开截断/vim/无限滚动'), 'cad-dim'),
         line('<b>vim 键位</b>', 'cad-sect'),
         line(esc('j/k 滚动 · h/l 上/下页 · gg/G 顶/底 · 数字前缀如 5j · 数字+Enter 开帖'), 'cad-dim'),
         line(esc('/ 搜索 · : 命令 · i 聚焦输入框 · o 预填 open/search · ctrl+o 展开截断'), 'cad-dim'),
@@ -979,10 +1021,10 @@
     const lsOut = () => {
         if (!lastData) return [line('no data', 'cad-faint')];
         if (lastData.kind === 'topics')
-            return lastData.topics.slice(0, 20).map((t, i) =>
+            return lastData.topics.filter(t => !t.sep).slice(0, 20).map((t, i) =>
                 line(`<span class="cad-topicnum">${i + 1}</span> ${esc(t.title)} <span class="cad-faint">· ${esc(t.replies || '0')} 回复</span>`));
         if (lastData.kind === 'posts')
-            return lastData.posts.map(p => line(esc(p.head), 'cad-faint'));
+            return lastData.posts.filter(p => !p.sep).map(p => line(esc(p.head), 'cad-faint'));
         return [line('no data', 'cad-faint')];
     };
 
@@ -994,8 +1036,9 @@
             if (bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight;
         };
         if (!lastData || lastData.kind !== 'topics') return fail('当前不是板块列表页');
-        const t = lastData.topics[n - 1];
-        if (!t) return fail(`没有第 ${n} 帖（共 ${lastData.topics.length}）`);
+        const list = lastData.topics.filter(t => !t.sep);
+        const t = list[n - 1];
+        if (!t) return fail(`没有第 ${n} 帖（共 ${list.length}）`);
         location.href = t.href;
     };
 
@@ -1023,7 +1066,7 @@
             return;
         }
         else if (m === 'version' || m === 'about')
-            out = [line('NGA Code Agent 伪装 <b>v2.1.1</b> · 渲染层 Preact 重构 · ` 切换伪装', 'cad-faint')];
+            out = [line('NGA Code Agent 伪装 <b>v2.2.0</b> · 渲染层 Preact 重构 · ` 切换伪装', 'cad-faint')];
         else if (m === 'pwd') out = [line(esc(cwdFor(lastData || { kind: 'idle' })), 'cad-faint')];
         else if (m === 'whoami') out = [line('ivan — 正在认真调试 code agent（并没有摸鱼）', 'cad-faint')];
         else if (m.startsWith('sudo')) out = [line(esc('sudo: permission denied — 老板在看着'), 'cad-faint')];
@@ -1115,8 +1158,8 @@
         }
         else if (m === 'autopage' || m === 'auto page') {
             store.autopage = !store.autopage;
-            if (!store.autopage) disarmAutoPage();
-            out = [line(`autopage → ${store.autopage ? 'on（滚到底停留 6s 自动翻页）' : 'off'}`, 'cad-faint')];
+            if (store.autopage) maybeAutoLoad();
+            out = [line(`autopage → ${store.autopage ? 'on（滚到底自动加载下一页）' : 'off'}`, 'cad-faint')];
         }
         else out = fallbackMsg(cmd);
 
@@ -1183,9 +1226,32 @@
         const sig = quickSig();
         if (!force && sig === lastSig) return;
         lastSig = sig;
-        lastData = extract();
+        const fresh = extract();
+        // 无限滚动：同页数据刷新时保留已追加的分页（只替换第一页部分；topics 对新增导致的位移去重）
+        let merged = false;
+        if (fresh && lastData && fresh.kind === lastData.kind && location.href === dataHref
+            && (fresh.kind === 'posts' || fresh.kind === 'topics')) {
+            const key = fresh.kind;
+            const sepIdx = lastData[key].findIndex(x => x.sep);
+            if (sepIdx >= 0) {
+                let tail = lastData[key].slice(sepIdx);
+                if (key === 'topics') {
+                    const freshHrefs = new Set(fresh.topics.map(t => t.href));
+                    tail = tail.filter(x => x.sep || !freshHrefs.has(x.href));
+                }
+                fresh[key] = fresh[key].concat(tail);
+                merged = true;
+            }
+        }
+        lastData = fresh;
+        dataHref = location.href;
+        if (!merged) {
+            nextPageUrl = findNextUrl(lastData && lastData.pager);
+            loadedPages.add(location.href);
+        }
         ensureLocs();
         renderApp();
+        maybeAutoLoad();   // 首屏不足一屏（短页）时立即补下一页
     };
 
     const build = () => {
@@ -1200,7 +1266,6 @@
 
     const toggleDisguise = () => {
         store.on = !store.on;
-        disarmAutoPage();
         if (store.on) {
             build();
             applyAttrs();
@@ -1223,7 +1288,6 @@
             return;
         }
         if (!store.on) return;
-        if (autoPageTimer) cancelAutoPage();   // 任意全局按键取消自动翻页
         if (e.ctrlKey && (e.key === 'o' || e.key === 'O')) {
             e.preventDefault();
             store.expand = !store.expand;
