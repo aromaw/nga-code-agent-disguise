@@ -293,8 +293,7 @@
 
     /* 正文抽取：返回 { text, imgs }。
        显示图片时，正文图替换为占位 token  N （N = imgs 下标），
-       渲染阶段按 token 把图片插回原始位置，不再全部堆到文字后面。
-*/
+       渲染阶段按 token 把图片插回原始位置，不再全部堆到文字后面。 */
     const contentText = (node, showImg) => {
         if (!node) return { text: '', imgs: [] };
         const clone = node.cloneNode(true);
