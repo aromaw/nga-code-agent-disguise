@@ -36,7 +36,7 @@ next page / prev page 下一页 / 上一页（帖子与列表通用）
 go page <n>           跳到第 n 页
 open <n>              打开板块页第 n 帖
 ls                    列出当前内容
-autopage              滚到底 3 秒自动翻页开关（上滚取消）
+autopage              滚到底停留 6 秒自动翻页（上滚 / 按键 / 点击浮标取消）
 img / op / expand     显示图片 / 只看楼主 / 展开截断
 theme / dark / light  主题切换
 clear                 清空命令回显
