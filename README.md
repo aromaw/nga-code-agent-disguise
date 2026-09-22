@@ -36,7 +36,7 @@ next page / prev page 下一页 / 上一页（帖子与列表通用）
 go page <n>           跳到第 n 页
 open <n>              打开板块页第 n 帖
 ls                    列出当前内容
-autopage              滚到底停留 6 秒自动翻页（上滚 / 按键 / 点击浮标取消）
+autopage              无限滚动：滚到底自动抓取下一页，内容接在下方继续滑动
 img / op / expand     显示图片 / 只看楼主 / 展开截断
 theme / dark / light  主题切换
 clear                 清空命令回显
@@ -58,6 +58,7 @@ exit                  退出伪装（同 ` 键）
 
 ## 其他特性
 
+- 无限滚动：滚到底自动抓取下一页内容追加在下方（带 ── page N ── 分隔线，到底 / 失败有状态提示），帖子与板块列表通用
 - 双风格：Claude Code（欢迎框 + ❯ 提示符）与 Codex CLI（user/codex 对话块 + banner），各含明暗两套配色
 - 热点回复单独区块展示，OP 反色徽章，IP 属地显示（nuke.php 接口 + 本地缓存）
 - 图片原位渲染（占位 token 插回原文位置），主源失败自动回退备胎链接
