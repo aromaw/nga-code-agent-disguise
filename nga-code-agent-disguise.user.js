@@ -293,7 +293,8 @@
 
     /* 正文抽取：返回 { text, imgs }。
        显示图片时，正文图替换为占位 token  N （N = imgs 下标），
-       渲染阶段按 token 把图片插回原始位置，不再全部堆到文字后面。 */
+       渲染阶段按 token 把图片插回原始位置，不再全部堆到文字后面。
+*/
     const contentText = (node, showImg) => {
         if (!node) return { text: '', imgs: [] };
         const clone = node.cloneNode(true);
@@ -311,7 +312,7 @@
                 const o = imgSrc(i);
                 if (!o.main) { i.remove(); return; }
                 imgs.push(o);
-                i.replaceWith(` ${imgs.length - 1} `);
+                i.replaceWith(`${imgs.length - 1}`);
             } else {
                 i.replaceWith('[image]');
             }
@@ -516,9 +517,9 @@
     /* 引用块：按嵌套深度缩进 */
     const Quote = ({ q }) => html`<div class="cad-qline" style=${'margin-left:' + (q.depth * 14) + 'px'}>▎${q.text}</div>`;
 
-    /* 正文：按 \u0001N\u0001 token 把图片插回原始位置（Preact 自动转义文本） */
+    /* 正文：按 N token 把图片插回原始位置（Preact 自动转义文本） */
     const PostBody = ({ p, maxLines }) => {
-        const parts = truncate(p.text, maxLines).split(/\u0001(\d+)\u0001/);
+        const parts = truncate(p.text, maxLines).split(/(\d+)/);
         return html`<div class="cad-text cad-line">${parts.map((part, i) =>
             i % 2 ? (p.imgs[+part] ? html`<${Img} o=${p.imgs[+part]} />` : null) : part)}</div>`;
     };
