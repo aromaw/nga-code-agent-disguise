@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NGA Code Agent 伪装（Claude Code / Codex）
 // @namespace    https://github.com/zhaoyifan
-// @version      2.2.2
+// @version      2.2.3
 // @description  将 NGA 页面伪装成 Claude Code / Codex CLI 终端会话，旁人看来你在用 code agent。` 一键切换，? 帮助，输入栏可敲命令（search: 搜索 · board 切版 · help 查看全部），vim 键位。渲染层 Preact 重构
 // @author       zhaoyifan
 // @match        *://bbs.nga.cn/*
@@ -865,10 +865,15 @@
         const label = pageNo ? `page ${pageNo}` : 'next page';
         loadedPages.add(pageUrl);
         const end = () => { if (opMode) opEnd = true; else nextPageUrl = null; };
+        // 解析为空分两种：有效 NGA 页但零内容=真到底；无页面容器=异常页（限流/验证码），标记失败可点击重试
+        const emptyFail = containerSel => {
+            if (doc.querySelector(containerSel)) end();
+            else autoPageError = true;
+        };
         if (lastData.kind === 'posts') {
             const opUid = opUidSticky || (lastData.posts.length ? lastData.posts[0].uid : undefined);
             const data = extractPosts(doc, opUid);
-            if (!data || !data.posts.length) { end(); return; }
+            if (!data || !data.posts.length) { emptyFail('#m_posts'); return; }
             // 防重复：与已有楼层重叠的一律剔除，零新增即到底
             const seen = new Set(lastData.posts.filter(p => !p.sep).map(p => p.head));
             const freshPosts = data.posts.filter(p => !seen.has(p.head));
@@ -879,16 +884,25 @@
             if (opMode) opNextNo++;
         } else if (lastData.kind === 'topics') {
             const data = extractTopics(doc, pageUrl);
-            if (!data || !data.topics.length
-                || lastData.topics.some(t => !t.sep && t.href === data.topics[0].href)) {
-                nextPageUrl = null;
-                return;
-            }
+            if (!data || !data.topics.length) { emptyFail('#m_threads'); return; }
+            // 防重复：置顶帖在每页重复出现，重叠一律剔除，零新增即到底
+            const seenT = new Set(lastData.topics.filter(t => !t.sep).map(t => t.href));
+            const freshTopics = data.topics.filter(t => !seenT.has(t.href));
+            if (!freshTopics.length) { nextPageUrl = null; return; }
             lastData.topics.push({ sep: label });
-            lastData.topics.push(...data.topics);
+            lastData.topics.push(...freshTopics);
         } else return;
         if (!opMode) {   // op 模式由 opNextNo 驱动，不动普通分页链
-            const u = findNextUrl(extractPager(doc, pageUrl));
+            let u = findNextUrl(extractPager(doc, pageUrl));
+            if (!u) {   // 抓到页的翻页条常由 NGA 前端 JS 动态渲染（原始 HTML 无链接），按页码顺推兜底
+                try {
+                    const x = new URL(pageUrl);
+                    if (/read\.php|thread\.php/.test(x.pathname)) {
+                        x.searchParams.set('page', String(Math.max(1, parseInt(x.searchParams.get('page') || '1', 10) || 1) + 1));
+                        u = x.href;
+                    }
+                } catch { }
+            }
             nextPageUrl = (u && !loadedPages.has(u)) ? u : null;
         }
         ensureLocs();   // 为追加楼层的 uid 预取属地
@@ -929,7 +943,7 @@
                 if (location.href !== hrefAtStart) return;   // 抓取期间已翻页，丢弃
                 appendPage(new DOMParser().parseFromString(txt, 'text/html'), fetchUrl, opMode);
                 renderApp();
-                maybeAutoLoad();   // 追加后仍贴近底部（短页）时链式补齐
+                setTimeout(maybeAutoLoad, 250);   // 追加后仍贴近底部（短页）时链式补齐，限速降低限流概率
             })
             .catch(() => {
                 autoPageLoading = false;
@@ -1130,7 +1144,7 @@
             return;
         }
         else if (m === 'version' || m === 'about')
-            out = [line('NGA Code Agent 伪装 <b>v2.2.2</b> · 渲染层 Preact 重构 · ` 切换伪装', 'cad-faint')];
+            out = [line('NGA Code Agent 伪装 <b>v2.2.3</b> · 渲染层 Preact 重构 · ` 切换伪装', 'cad-faint')];
         else if (m === 'pwd') out = [line(esc(cwdFor(lastData || { kind: 'idle' })), 'cad-faint')];
         else if (m === 'whoami') out = [line('ivan — 正在认真调试 code agent（并没有摸鱼）', 'cad-faint')];
         else if (m.startsWith('sudo')) out = [line(esc('sudo: permission denied — 老板在看着'), 'cad-faint')];
