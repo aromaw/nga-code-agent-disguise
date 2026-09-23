@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NGA Code Agent 伪装（Claude Code / Codex）
 // @namespace    https://github.com/zhaoyifan
-// @version      2.2.0
+// @version      2.2.1
 // @description  将 NGA 页面伪装成 Claude Code / Codex CLI 终端会话，旁人看来你在用 code agent。` 一键切换，? 帮助，输入栏可敲命令（search: 搜索 · board 切版 · help 查看全部），vim 键位。渲染层 Preact 重构
 // @author       zhaoyifan
 // @match        *://bbs.nga.cn/*
@@ -851,6 +851,21 @@
         ensureLocs();   // 为追加楼层的 uid 预取属地
     };
 
+    /* NGA 页面是 GBK 编码：fetch 的 .text() 固定按 UTF-8 解码会乱码，须按 charset 显式解码 */
+    const decodeRes = r => {
+        const m = (r.headers.get('content-type') || '').match(/charset=([\w-]+)/i);
+        return r.arrayBuffer().then(buf => {
+            let cs = m && m[1];
+            if (!cs) {   // 响应头没带 charset 时从 meta 嗅探（前 4KB 按 latin1 读即可）
+                const head = new TextDecoder('latin1').decode(buf.slice(0, 4096));
+                const mm = head.match(/charset=["']?([\w-]+)/i);
+                cs = mm && mm[1];
+            }
+            try { return new TextDecoder(cs || 'gbk').decode(buf); }
+            catch { return new TextDecoder('gbk').decode(buf); }   // NGA 默认 GBK
+        });
+    };
+
     const loadNextPage = () => {
         if (autoPageLoading || !nextPageUrl || !lastData || lastData.kind === 'idle') return;
         autoPageLoading = true;
@@ -859,7 +874,7 @@
         const hrefAtStart = location.href;
         renderApp();
         fetch(fetchUrl, { credentials: 'include' })
-            .then(r => r.text())
+            .then(decodeRes)
             .then(txt => {
                 autoPageLoading = false;
                 if (location.href !== hrefAtStart) return;   // 抓取期间已翻页，丢弃
@@ -1066,7 +1081,7 @@
             return;
         }
         else if (m === 'version' || m === 'about')
-            out = [line('NGA Code Agent 伪装 <b>v2.2.0</b> · 渲染层 Preact 重构 · ` 切换伪装', 'cad-faint')];
+            out = [line('NGA Code Agent 伪装 <b>v2.2.1</b> · 渲染层 Preact 重构 · ` 切换伪装', 'cad-faint')];
         else if (m === 'pwd') out = [line(esc(cwdFor(lastData || { kind: 'idle' })), 'cad-faint')];
         else if (m === 'whoami') out = [line('ivan — 正在认真调试 code agent（并没有摸鱼）', 'cad-faint')];
         else if (m.startsWith('sudo')) out = [line(esc('sudo: permission denied — 老板在看着'), 'cad-faint')];
