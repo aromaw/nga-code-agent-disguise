@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NGA Code Agent 伪装（Claude Code / Codex）
 // @namespace    https://github.com/zhaoyifan
-// @version      2.2.3
+// @version      2.3.0
 // @description  将 NGA 页面伪装成 Claude Code / Codex CLI 终端会话，旁人看来你在用 code agent。` 一键切换，? 帮助，输入栏可敲命令（search: 搜索 · board 切版 · help 查看全部），vim 键位。渲染层 Preact 重构
 // @author       zhaoyifan
 // @match        *://bbs.nga.cn/*
@@ -27,6 +27,7 @@
         get expand(){ return GM_getValue('cad_expand', false); },    // 展开全部截断楼层
         get vim()   { return GM_getValue('cad_vim', true); },        // vim 键位
         get autopage(){ return GM_getValue('cad_autopage', true); }, // 滚到底自动加载下一页
+        get compact(){ return GM_getValue('cad_compact', true); }, // 精简终端提示
         set on(v)    { GM_setValue('cad_on', v); },
         set style(v) { GM_setValue('cad_style', v); },
         set mode(v)  { GM_setValue('cad_mode', v); },
@@ -35,9 +36,22 @@
         set expand(v){ GM_setValue('cad_expand', v); },
         set vim(v)   { GM_setValue('cad_vim', v); },
         set autopage(v){ GM_setValue('cad_autopage', v); },
+        set compact(v){ GM_setValue('cad_compact', v); },
     };
 
     const FAKE_DIR  = '~/projects/api-server';
+    const COVER_TEXT = `src/server.ts
+  ✓ Validate request parameters before dispatch
+  ✓ Propagate cancellation to downstream handlers
+  ✓ Return consistent errors at the API boundary
+
+async function handleRequest(request, context) {
+  const input = validate(request);
+  const result = await service.execute(input, {
+    signal: context.signal,
+  });
+  return response.ok(result);
+}`;
     const FAVICON = "data:image/svg+xml," + encodeURIComponent(
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#0d0d0d"/><text x="50" y="70" font-size="62" text-anchor="middle" fill="#fff" font-family="monospace">›</text></svg>`
     );
@@ -82,6 +96,30 @@
         background:var(--bg); color:var(--text);
         font-family:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,"Maple Mono NF CN","Sarasa Mono SC","Microsoft YaHei UI",monospace;
         font-size:14px; line-height:1.58; letter-spacing:0.25px;
+    }
+    #cad__root, #cad__root * { box-sizing:border-box; }
+    #cad__root button { font:inherit; }
+    #cad__root a:focus-visible, #cad__root button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+    #cad__root .cad-body { min-height:0; overflow-x:hidden; overscroll-behavior:contain; }
+    .cad-windowtitle { margin:auto; color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .cad-topbar { border-bottom:1px solid var(--border); min-height:30px; }
+    .cad-action { border:0; background:none; color:var(--dim); cursor:pointer; padding:2px 6px; }
+    .cad-action:hover { color:var(--accent2); }
+    .cad-topbar .cad-action { font-size:11px; }
+    .cad-covered > .cad-body, .cad-covered > .cad-inputbar, .cad-covered > .cad-statusbar { display:none; }
+    .cad-cover { flex:1; overflow:auto; padding:24px; white-space:pre-wrap; }
+    .cad-cover-code { color:var(--dim); line-height:1.8; }
+    .cad-expand { display:block; font-size:12px !important; padding-left:0; margin-top:4px; }
+    .cad-trow { display:grid; grid-template-columns:38px 52px minmax(0,1fr); column-gap:0; }
+    .cad-trow .cad-meta { grid-column:3; font-size:11px; }
+    .cad-trow .cad-tlink { min-width:0; }
+    .cad-inputbar > .cad-faint { max-width:35%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .cad-statusbar { overflow:hidden; white-space:nowrap; }
+    @media (prefers-reduced-motion:reduce) { .cad-cursor { animation:none; } }
+    @media (max-width:760px) {
+        .cad-statusbar .cad-secondary { display:none; }
+        .cad-topbar { padding:0 8px; }
+        .cad-inputbar > .cad-faint { display:none; }
     }
 
     /* 顶部极简窗口点 */
@@ -227,6 +265,11 @@
         }
     };
     injectStyle();
+    // document-start 即隐藏原页，避免刷新时闪出论坛；启动失败时自动恢复。
+    if (store.on) document.documentElement.classList.add('cad-on');
+    const startupGuard = setTimeout(() => {
+        if (!document.getElementById('cad__root')) document.documentElement.classList.remove('cad-on');
+    }, 4000);
 
     /* 保险：移除页面可能的 meta 自动刷新（head 未解析完时用观察者兜底） */
     const stripMetaRefresh = () => {
@@ -259,6 +302,10 @@
     let dataHref = '';           // lastData 锚定的 URL（无限滚动合并判断）
     let typed = '';              // 输入栏受控文本
     let focused = false;         // 输入栏是否聚焦（控制假光标显示）
+    let covered = false;
+    let coverFocus = false;
+    const expandedPosts = new Set();
+    let pageRequest = null;
     let gTs = 0;                 // vim gg 等待窗口
     let autoPageLoading = false; // 下一页抓取中
     let autoPageError = false;   // 上次抓取失败（显示重试入口）
@@ -278,16 +325,9 @@
     /* esc 仅服务于命令层输出的 HTML 串（line()）；组件层由 Preact 自动转义，不需要它 */
     const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    /* 截断：store.expand 时全量展开；提示与真实的 ctrl+o 快捷键对应 */
-    const truncate = (s, n) => {
-        if (store.expand) return s;
-        const lines = s.split('\n');
-        const joined = lines.slice(0, n).join('\n');
-        return lines.length > n ? joined + `\n… +${lines.length - n} lines (ctrl+o to expand)` : joined;
-    };
-
     /* 伪 shell 工作目录 */
     const cwdFor = data => {
+        if (store.compact) return FAKE_DIR;
         if (data.kind === 'posts') return `~/threads/${(location.href.match(/tid=(\d+)/) || [])[1] || 'latest'}`;
         if (data.kind === 'topics') return `~/boards/${(data.board || 'board').replace(/\s+/g, '-')}`;
         return '~';
@@ -313,41 +353,50 @@
     /* 不可见字符清理 + 去除空首行（NGA 会塞 ZWSP） */
     const cleanText = s => {
         // ZWSP (U+200B) 用 fromCharCode 引用，源码里不放不可见字符
-        const lines = s.split(String.fromCharCode(0x200b)).join('').split('\n').map(l => l.trim());
+        const lines = (s || '').split(String.fromCharCode(0x200b)).join('').split('\n').map(l => l.trimEnd());
         const invis = /^\s*$/;   // JS \s 本身覆盖 U+00A0 / U+3000
         while (lines.length && invis.test(lines[0])) lines.shift();
         while (lines.length && invis.test(lines[lines.length - 1])) lines.pop();
         return lines.join('\n').replace(/\n{3,}/g, '\n\n');
     };
 
+    // innerText 在 detached/隐藏 DOM 上不保留 br、块级边界；显式序列化，保留代码缩进。
+    const plainText = node => {
+        const blocks = /^(DIV|P|PRE|BLOCKQUOTE|LI|UL|OL|TABLE|TR|H[1-6])$/;
+        const walk = n => {
+            if (n.nodeType === 3) return n.nodeValue;
+            if (n.nodeType !== 1) return '';
+            if (/^(SCRIPT|STYLE)$/.test(n.tagName)) return '';
+            if (n.tagName === 'BR') return '\n';
+            const value = [...n.childNodes].map(walk).join('');
+            return blocks.test(n.tagName) ? '\n' + value + '\n' : value;
+        };
+        return cleanText(walk(node));
+    };
+
     /* 正文抽取：返回 { text, imgs }。
        显示图片时，正文图替换为占位 token %%IMGN%%（N = imgs 下标），
        渲染阶段按 token 把图片插回原始位置，不再全部堆到文字后面。 */
-    const contentText = (node, showImg) => {
+    const contentText = node => {
         if (!node) return { text: '', imgs: [] };
         const clone = node.cloneNode(true);
         // 引用块单独抽取，此处移除避免混入正文
         clone.querySelectorAll('.quote').forEach(q => q.remove());
         const imgs = [];
         clone.querySelectorAll('img').forEach(i => {
-            const src = i.getAttribute('src') || '';
             if (isEmote(i)) {
                 const alt = i.getAttribute('alt');
                 i.replaceWith(alt ? `[${alt}]` : '');
-            } else if (/about:blank|loading|spacer|placeholder/i.test(src)) {
-                i.remove(); // 追踪图/占位图，静默移除
-            } else if (showImg) {
+            } else {
                 const o = imgSrc(i);
                 if (!o.main) { i.remove(); return; }
                 imgs.push(o);
                 i.replaceWith(`%%IMG${imgs.length - 1}%%`);
-            } else {
-                i.replaceWith('[image]');
             }
         });
         // 点赞数、操作按钮等噪声
         clone.querySelectorAll('script,style,button,.recommendvalue,.ogoodbtn,.postBtnPos,.postinfo,.single_ttip2,.postbtnsc,.right_').forEach(i => i.remove());
-        return { text: cleanText(clone.innerText), imgs };
+        return { text: plainText(clone), imgs };
     };
 
     /* 记录真实标题，避免被伪装标题污染 */
@@ -431,7 +480,7 @@
                     const alt = im.getAttribute('alt');
                     isEmote(im) ? im.replaceWith(alt ? `[${alt}]` : '') : im.remove();
                 });
-                return { depth, text: cleanText(c.innerText) };
+                return { depth, text: plainText(c) };
             }).filter(q => q.text)
             : [];
         const head = [
@@ -440,8 +489,10 @@
             dateM && dateM[0],
             likes && likes !== '0' ? `+${likes}` : '',
         ].filter(Boolean).join(' · ');
-        const body = contentText(content, store.img);
-        return { head, uid, isOP, text: body.text, imgs: body.imgs, quotes };
+        const body = contentText(content);
+        // DOM id 可能在每页重新编号；楼号 + 用户更稳定，也不会受点赞数变化影响。
+        const id = floorM ? `floor:${floorM[1]}:${uid}` : [uid, dateM && dateM[0], body.text].join('|');
+        return { id, head, uid, isOP, text: body.text, imgs: body.imgs, quotes };
     };
 
     /* 按「热点回复」文字定位热楼容器（NGA 该模块 id/class 不稳定） */
@@ -471,7 +522,9 @@
         const boxes = allBoxes.filter(b => !hotBoxes.some(hb => hb === b || hb.contains(b)));
         if (!boxes.length) return null;
         // 首楼 UID 即楼主（追加页用 override）
-        const opUid = opUidOverride !== undefined ? opUidOverride : postUid(boxes[0]);
+        const markedOP = boxes.find(b => /楼主/.test(text(b.querySelector('.posterinfo .author, .posterInfoLine .author, [id^="postauthor"]'))));
+        const opUid = opUidOverride !== undefined ? opUidOverride
+            : (opUidTid === curTid() && opUidSticky) || (markedOP ? postUid(markedOP) : curPageNo() <= 1 ? postUid(boxes[0]) : '');
         const posts = boxes.map((b, i) => parsePost(b, i, opUid));
         // 1 楼正文首行常与标题重复，去掉（仅当前页首楼）
         if (opUidOverride === undefined && posts.length && posts[0].text.startsWith(title)) {
@@ -574,9 +627,16 @@
 
     /* 正文：按 %%IMGN%% token 把图片插回原始位置（Preact 自动转义文本） */
     const PostBody = ({ p, maxLines }) => {
-        const parts = truncate(p.text, maxLines).split(/%%IMG(\d+)%%/);
+        const expanded = store.expand || expandedPosts.has(p.id);
+        const lines = p.text.split('\n');
+        const clipped = !expanded && lines.length > maxLines;
+        const parts = (clipped ? lines.slice(0, maxLines).join('\n') : p.text).split(/%%IMG(\d+)%%/);
         return html`<div class="cad-text cad-line">${parts.map((part, i) =>
-            i % 2 ? (p.imgs[+part] ? html`<${Img} o=${p.imgs[+part]} />` : null) : part)}</div>`;
+            i % 2 ? (p.imgs[+part] ? store.img ? html`<${Img} key=${p.imgs[+part].main} o=${p.imgs[+part]} />` : '[image]' : null) : part)}
+            ${lines.length > maxLines && !store.expand ? html`<button class="cad-action cad-expand" onClick=${() => {
+                if (expandedPosts.has(p.id)) expandedPosts.delete(p.id); else expandedPosts.add(p.id);
+                renderApp();
+            }}>${clipped ? '… +' + (lines.length - maxLines) + ' lines · expand' : '− collapse'}</button>` : null}</div>`;
     };
 
     const PostBlock = ({ p, maxLines }) => html`
@@ -591,15 +651,15 @@
     </div>` : null;
 
     /* ls -l 风列对齐：序号 | 回复数(右对齐定宽) | 标题 | 元信息 */
-    const TopicRow = ({ t, i, bullet }) => html`
+    const TopicRow = ({ t, i }) => html`
     <div class="cad-trow cad-line">
-        <span class="cad-topicnum">${i + 1}</span><span class="cad-trep">${t.replies || '0'}</span>${bullet ? html`<span class="cad-bullet"></span>` : null}<a class="cad-tlink" href=${t.href}>${t.title}</a>
+        <span class="cad-topicnum">${i + 1}</span><span class="cad-trep">${t.replies || '0'}</span><a class="cad-tlink" href=${t.href}>${t.title}</a>
         <span class="cad-meta"> · ${t.author}${t.postDate ? ' ' + t.postDate : ''}${t.replyer ? ' · 最后 ' + t.replyer : ''}${t.replyDate ? ' ' + t.replyDate : ''}</span>
     </div>`;
 
     /* 收藏板块快捷栏：可见的板块切换入口（boards: 名字可点击，[+] 收藏当前版） */
     const BoardsBar = () => {
-        if (!boards.length) return null;
+        if (!boards.length || store.compact) return null;
         const cur = curFid();
         return html`
     <div class="cad-boards cad-line cad-faint">boards:${boards.map((b, i) => html` <a class="cad-pagelink${String(b.fid) === String(cur) ? ' cad-boardcur' : ''}" href=${'/thread.php?fid=' + encodeURIComponent(b.fid)} title=${'board ' + (i + 1)}>${b.name}</a>`)}${cur ? html` <span class="cad-boardadd" title="board add 收藏当前版" onClick=${() => runCmd('board add')}>[+]</span>` : null}
@@ -609,7 +669,8 @@
     /* 伪 shell 命令回显行（视图顶部那条 band 背景行） */
     const CmdLine = ({ cwd, cmd }) => html`<div class="cad-cmd"><span class="cad-ps1">➜ ${cwd}</span> ${cmd}</div>`;
 
-    const Welcome = ({ cwd }) => html`
+    const Welcome = ({ cwd }) => store.compact ? html`
+    <div class="cad-banner"><b>✻ Claude Code</b><br />workspace: ${cwd}<br /><span class="cad-faint">Ready · ? for shortcuts</span></div>` : html`
     <div class="cad-welcome">
         <div class="left">
             <div class="logo">✻ Welcome to Claude Code</div>
@@ -626,7 +687,7 @@
     </div>`;
 
     const CodexBanner = () => html`
-    <div class="cad-banner"><b>OpenAI Codex</b> CLI v0.42.0 · model: <b>gpt-5-codex</b> · reasoning: medium · dir: ${FAKE_DIR} · approvals: on-request</div>`;
+    <div class="cad-banner"><b>› OpenAI Codex</b><br />model: <b>gpt-5-codex</b> · reasoning: medium<br />directory: ${FAKE_DIR}</div>`;
 
     const ClaudeView = ({ data }) => {
         const cwd = cwdFor(data);
@@ -634,23 +695,23 @@
             let tn = 0;
             return html`
         <${Welcome} cwd=${cwd} />
-        <${CmdLine} cwd=${cwd} cmd="ls" />
-        <div class="cad-line"><span class="cad-sect">${data.board}</span> <span class="cad-faint">· ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics</span></div>
-        ${data.topics.map(t => t.sep ? html`<${PageSep} label=${t.sep} />` : html`<${TopicRow} t=${t} i=${tn++} />`)}
+        <${CmdLine} cwd=${cwd} cmd=${store.compact ? 'rg --files src/' : 'ls'} />
+        <div class="cad-line"><span class="cad-sect">${store.compact ? 'workspace / index' : data.board}</span> <span class="cad-faint">· ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics</span></div>
+        ${data.topics.map(t => t.sep ? html`<${PageSep} key=${t.sep} label=${t.sep} />` : html`<${TopicRow} key=${t.href} t=${t} i=${tn++} />`)}
         <${Pager} pager=${data.pager} />`;
         }
         if (data.kind === 'posts') {
             const visible = store.opOnly ? data.posts.filter(p => p.isOP || p.sep) : data.posts;
             return html`
-        <${CmdLine} cwd=${cwd} cmd=${'open "' + data.title + '"'} />
-        <div class="cad-line cad-faint">thread: ${data.title} · ${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} replies${store.opOnly ? ' · OP only' : ''}</div>
+        <${CmdLine} cwd=${cwd} cmd=${store.compact ? 'cat notes/review.md' : 'open "' + data.title + '"'} />
+        <div class="cad-line cad-faint">${store.compact ? 'review' : 'thread'}: ${data.title} · ${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} replies${store.opOnly ? ' · OP only' : ''}</div>
         ${(!store.opOnly && data.hot && data.hot.length) ? html`
-        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">hot replies</span></div>
-        ${data.hot.map(p => html`<${PostBlock} p=${p} maxLines=${14} />`)}` : null}
-        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">all replies</span></div>
-        ${visible.map(p => p.sep ? html`<${PageSep} label=${p.sep} />` : html`<${PostBlock} p=${p} maxLines=${14} />`)}
+        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'highlights' : 'hot replies'}</span></div>
+        ${data.hot.map(p => html`<${PostBlock} key=${'hot-' + p.id} p=${p} maxLines=${14} />`)}` : null}
+        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'output' : 'all replies'}</span></div>
+        ${visible.map(p => p.sep ? html`<${PageSep} key=${p.sep} label=${p.sep} />` : html`<${PostBlock} key=${p.id} p=${p} maxLines=${14} />`)}
         <${Pager} pager=${data.pager} />
-        <div class="cad-line cad-faint" style="margin-top:8px">✻ Rendered ${visible.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} replies · next page / go page N 翻页 · ctrl+o ${store.expand ? '收起' : '展开'}截断</div>`;
+        <div class="cad-line cad-faint" style="margin-top:8px">✻ Rendered ${visible.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} entries${store.compact ? ' · ctrl+o to expand' : ' · next page / go page N 翻页 · ctrl+o 展开截断'}</div>`;
         }
         return html`<div class="cad-line cad-faint">⏵⏵ 此页面暂无可伪装的帖子/板块数据 — \` 退出伪装，F5 重试</div>`;
     };
@@ -662,28 +723,28 @@
             return html`
         <${CodexBanner} />
         <div class="cad-blocktag">user</div>
-        <div class="cad-line">列出板块「${data.board}」的帖子</div>
+        <div class="cad-line">${store.compact ? 'Inspect the workspace index' : '列出板块「' + data.board + '」的帖子'}</div>
         <div class="cad-blocktag">codex</div>
         <div class="cad-line cad-faint">cwd: ${cwd} · ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics</div>
-        ${data.topics.map(t => t.sep ? html`<${PageSep} label=${t.sep} />` : html`<${TopicRow} t=${t} i=${tn++} bullet=${true} />`)}
+        ${data.topics.map(t => t.sep ? html`<${PageSep} key=${t.sep} label=${t.sep} />` : html`<${TopicRow} key=${t.href} t=${t} i=${tn++} />`)}
         <${Pager} pager=${data.pager} />
-        <div class="cad-line cad-faint" style="margin-top:8px">Working… (esc to interrupt)</div>`;
+        <div class="cad-line cad-faint" style="margin-top:8px">Done · Esc to pause</div>`;
         }
         if (data.kind === 'posts') {
             const visible = store.opOnly ? data.posts.filter(p => p.isOP || p.sep) : data.posts;
             return html`
         <${CodexBanner} />
         <div class="cad-blocktag">user</div>
-        <div class="cad-line">打开帖子「${data.title}」</div>
+        <div class="cad-line">${store.compact ? 'Read notes/review.md' : '打开帖子「' + data.title + '」'}</div>
         <div class="cad-blocktag">codex</div>
         <div class="cad-line cad-faint">${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} replies${store.opOnly ? ' · OP only' : ''} · cwd: ${cwd}</div>
         ${(!store.opOnly && data.hot && data.hot.length) ? html`
-        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">hot replies</span></div>
-        ${data.hot.map(p => html`<${PostBlock} p=${p} maxLines=${12} />`)}` : null}
-        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">all replies</span></div>
-        ${visible.map(p => p.sep ? html`<${PageSep} label=${p.sep} />` : html`<${PostBlock} p=${p} maxLines=${12} />`)}
+        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'highlights' : 'hot replies'}</span></div>
+        ${data.hot.map(p => html`<${PostBlock} key=${'hot-' + p.id} p=${p} maxLines=${12} />`)}` : null}
+        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'output' : 'all replies'}</span></div>
+        ${visible.map(p => p.sep ? html`<${PageSep} key=${p.sep} label=${p.sep} />` : html`<${PostBlock} key=${p.id} p=${p} maxLines=${12} />`)}
         <${Pager} pager=${data.pager} />
-        <div class="cad-line cad-faint" style="margin-top:8px">Working… (esc to interrupt)</div>`;
+        <div class="cad-line cad-faint" style="margin-top:8px">Done · Esc to pause</div>`;
         }
         return html`<${CodexBanner} /><div class="cad-line cad-faint">Idle — 此页面暂无可伪装数据，\` 退出伪装</div>`;
     };
@@ -696,7 +757,7 @@
     </div>`)}`;
 
     /* Tab 补全命令表（NEEDS_ARG 补全后自动带空格） */
-    const CMDS = ['help', 'search:', 'board', 'board list', 'board add', 'board del', 'board fid', 'next page', 'prev page', 'go page', 'open', 'ls', 'top', 'theme', 'claude', 'codex', 'dark', 'light', 'img', 'op', 'expand', 'vim', 'autopage', 'clear', 'exit', 'version', 'pwd', 'whoami'];
+    const CMDS = ['help', 'search:', 'board', 'board list', 'board add', 'board del', 'board fid', 'next page', 'prev page', 'go page', 'open', 'ls', 'top', 'theme', 'claude', 'codex', 'dark', 'light', 'img', 'op', 'expand', 'vim', 'autopage', 'compact', 'pause', 'clear', 'exit', 'version', 'pwd', 'whoami'];
     const NEEDS_ARG = new Set(['search:', 'board', 'board add', 'board del', 'board fid', 'go page', 'open']);
     const tabComplete = v => {
         const hits = CMDS.filter(c => c.startsWith(v.toLowerCase()));
@@ -720,6 +781,7 @@
     /* 输入栏键盘逻辑：与全局快捷键隔离，Enter 执行命令，Tab 补全，↑↓ 历史，Esc 失焦，` 退出伪装 */
     const onInputKey = e => {
         e.stopPropagation();
+        if (e.isComposing || e.keyCode === 229) return;
         const el = e.currentTarget;
         if (e.key === 'Enter') {
             const v = el.value;
@@ -730,8 +792,9 @@
             e.preventDefault();
             if (el.value) tabComplete(el.value);
         } else if (e.key === 'Escape') {
-            el.blur();
-        } else if (e.key === 'Backquote') {
+            e.preventDefault();
+            toggleCover();
+        } else if (e.key === '`' || e.code === 'Backquote') {
             e.preventDefault();
             toggleDisguise();
         } else if (e.key === 'ArrowUp') {
@@ -757,7 +820,7 @@
         <span class="cad-ps1">➜</span>
         <span class="cad-faint">${cwdFor(lastData || { kind: 'idle' })}</span>
         <span class="prompt">❯</span>
-        <input class="cad-real" ref=${el => { inputEl = el; }} value=${typed}
+        <input class="cad-real" aria-label="终端命令" placeholder="Type a command…" ref=${el => { inputEl = el; }} value=${typed}
             spellcheck="false" autocomplete="off" autocapitalize="off"
             onInput=${e => { typed = e.currentTarget.value; }}
             onKeyDown=${onInputKey}
@@ -771,12 +834,12 @@
         ${store.style === 'claude' ? html`
             <span class="seg hi">? for shortcuts</span><span class="sep">·</span><span class="seg">⏵⏵ accept edits</span>`
         : html`
-            <span class="seg hi">gpt-5-codex</span><span class="sep">|</span><span class="seg">94% context left</span><span class="sep">|</span><span class="seg">${FAKE_DIR}</span><span class="sep">|</span><span class="seg">? help</span>`}
+            <span class="seg hi">gpt-5-codex</span><span class="sep">|</span><span class="seg cad-secondary">${FAKE_DIR}</span><span class="seg">? help</span>`}
         <span class="grow"></span>
         ${(store.vim && pendingCount) ? html`<span class="seg hi">${pendingCount}</span><span class="sep">·</span>` : null}
         ${store.vim ? html`<span class="seg">vim</span><span class="sep">·</span>` : null}
         <span class="seg">${store.mode}</span>
-        <span class="cad-themeswitch" title="t 切换主题" onClick=${() => cycleTheme()}>${store.style}</span>
+        <button class="cad-action cad-themeswitch" title="t 切换主题" onClick=${() => cycleTheme()}>${store.style}</button>
         <span class="sep">·</span>
         <span class="seg">${new Date().toTimeString().slice(0, 5)}</span>
     </div>`;
@@ -797,8 +860,9 @@
     const App = () => {
         const data = lastData || { kind: 'idle' };
         return html`
-        <div class="cad-topbar"><i></i><i></i><i></i></div>
-        <div class="cad-body" id="cad__body" ref=${el => { bodyEl = el; }} onScroll=${onBodyScroll}>
+        <div key="chrome" class="cad-topbar"><i></i><i></i><i></i><span class="cad-windowtitle">${FAKE_DIR} — ${store.style === 'claude' ? 'claude' : 'codex'}</span><button class="cad-action" onClick=${toggleCover} title="Esc 临时遮屏 / 恢复">${covered ? 'Resume' : 'Esc'}</button></div>
+        ${covered ? html`<div key="cover" class="cad-cover"><div class="cad-banner"><b>${store.style === 'claude' ? '✻ Claude Code' : '› OpenAI Codex'}</b><br />${FAKE_DIR}</div><div class="cad-line cad-user">Review request handling and error paths</div><pre class="cad-cover-code">${COVER_TEXT}</pre><div class="cad-line cad-faint">Review complete. Waiting for input.</div></div>` : null}
+        <div key="content" class="cad-body" id="cad__body" ref=${el => { bodyEl = el; }} onScroll=${onBodyScroll}>
             <${BoardsBar} />
             ${store.style === 'claude' ? html`<${ClaudeView} data=${data} />` : html`<${CodexView} data=${data} />`}
             <${AutoLoadState} />
@@ -815,16 +879,41 @@
         const hrefChanged = location.href !== lastHref;
         lastHref = location.href;
         if (hrefChanged) {
+            cancelPageRequest();
+            expandedPosts.clear();
             autoPageError = false;
             autoPageLoading = false;
             loadedPages = new Set([location.href]);
             opNextNo = null;
             opEnd = false;
         }
+        root.classList.toggle('cad-covered', covered);
         preactRender(html`<${App} />`, root);
         if (hrefChanged && bodyEl) bodyEl.scrollTop = 0;
     };
-    const syncChrome = () => renderApp();
+    const syncChrome = () => { renderApp(); if (store.on) setFavicon(true); };
+
+    const cancelPageRequest = () => {
+        if (pageRequest) pageRequest.abort();
+        pageRequest = null;
+        autoPageLoading = false;
+    };
+
+    const toggleCover = () => {
+        if (!store.on) return;
+        covered = !covered;
+        if (covered) {
+            coverFocus = document.activeElement === inputEl;
+            cancelPageRequest();
+            if (inputEl) inputEl.blur();
+        }
+        renderApp();
+        if (!covered) {
+            if (sourceDirty || location.href !== dataHref) scheduleRefresh();
+            if (coverFocus && inputEl) inputEl.focus();
+            maybeAutoLoad();
+        }
+    };
 
     /* ================= 无限滚动（滚到底自动抓取下一页，内容接在下方） ================= */
     const findNextUrl = pager => {
@@ -871,12 +960,12 @@
             else autoPageError = true;
         };
         if (lastData.kind === 'posts') {
-            const opUid = opUidSticky || (lastData.posts.length ? lastData.posts[0].uid : undefined);
+            const opUid = opUidSticky || lastData.posts.find(p => p.isOP)?.uid || '';
             const data = extractPosts(doc, opUid);
             if (!data || !data.posts.length) { emptyFail('#m_posts'); return; }
             // 防重复：与已有楼层重叠的一律剔除，零新增即到底
-            const seen = new Set(lastData.posts.filter(p => !p.sep).map(p => p.head));
-            const freshPosts = data.posts.filter(p => !seen.has(p.head));
+            const seen = new Set(lastData.posts.filter(p => !p.sep).map(p => p.id));
+            const freshPosts = data.posts.filter(p => !seen.has(p.id));
             if (!freshPosts.length) { end(); return; }
             if (opMode) freshPosts.forEach(p => { p.isOP = true; });   // authorid 页整页都是楼主
             lastData.posts.push({ sep: label });
@@ -924,7 +1013,7 @@
     };
 
     const loadNextPage = () => {
-        if (autoPageLoading || !lastData || lastData.kind === 'idle') return;
+        if (!store.on || covered || document.hidden || autoPageLoading || !lastData || lastData.kind === 'idle') return;
         const opMode = opModeOn();
         if (opMode ? opEnd : !nextPageUrl) return;
         autoPageLoading = true;
@@ -935,25 +1024,30 @@
         }
         const fetchUrl = opMode ? authoridUrl(opNextNo) : nextPageUrl;
         const hrefAtStart = location.href;
+        const controller = new AbortController();
+        pageRequest = controller;
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        const isCurrent = () => pageRequest === controller && location.href === hrefAtStart && opMode === opModeOn();
         renderApp();
-        fetch(fetchUrl, { credentials: 'include' })
-            .then(decodeRes)
+        fetch(fetchUrl, { credentials: 'include', signal: controller.signal })
+            .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return decodeRes(r); })
             .then(txt => {
+                if (!isCurrent()) return;
                 autoPageLoading = false;
-                if (location.href !== hrefAtStart) return;   // 抓取期间已翻页，丢弃
                 appendPage(new DOMParser().parseFromString(txt, 'text/html'), fetchUrl, opMode);
                 renderApp();
                 setTimeout(maybeAutoLoad, 250);   // 追加后仍贴近底部（短页）时链式补齐，限速降低限流概率
             })
             .catch(() => {
+                if (!isCurrent()) return;
                 autoPageLoading = false;
                 autoPageError = true;
                 renderApp();
-            });
+            }).finally(() => { clearTimeout(timeout); if (pageRequest === controller) pageRequest = null; });
     };
 
     const maybeAutoLoad = () => {
-        if (!store.autopage || autoPageLoading || autoPageError) return;
+        if (!store.on || covered || document.hidden || !store.autopage || autoPageLoading || autoPageError) return;
         if (nearBottom()) loadNextPage();   // 是否有下一页（含 opEnd）由 loadNextPage 自判
     };
     const onBodyScroll = () => maybeAutoLoad();
@@ -975,6 +1069,7 @@
         line(esc('autopage              滚到底自动加载下一页（无限滚动）'), 'cad-dim'),
         line(esc('ls                    列出当前内容 · open <n> 打开第 n 帖'), 'cad-dim'),
         line('<b>显示 / 开关</b>', 'cad-sect'),
+        line(esc('Esc / pause 临时遮屏并保留阅读位置 · compact 精简终端提示'), 'cad-dim'),
         line(esc('theme · claude/codex · dark/light   主题切换'), 'cad-dim'),
         line(esc('img · op · expand · vim · autopage  图片/只看楼主/展开截断/vim/无限滚动'), 'cad-dim'),
         line('<b>vim 键位</b>', 'cad-sect'),
@@ -1144,9 +1239,9 @@
             return;
         }
         else if (m === 'version' || m === 'about')
-            out = [line('NGA Code Agent 伪装 <b>v2.2.3</b> · 渲染层 Preact 重构 · ` 切换伪装', 'cad-faint')];
+            out = [line('NGA Code Agent 伪装 <b>v2.3.0</b> · 精简终端与临时遮屏 · ` 切换伪装', 'cad-faint')];
         else if (m === 'pwd') out = [line(esc(cwdFor(lastData || { kind: 'idle' })), 'cad-faint')];
-        else if (m === 'whoami') out = [line('ivan — 正在认真调试 code agent（并没有摸鱼）', 'cad-faint')];
+        else if (m === 'whoami') out = [line('developer', 'cad-faint')];
         else if (m.startsWith('sudo')) out = [line(esc('sudo: permission denied — 老板在看着'), 'cad-faint')];
         else if (m === 'ls' || m === 'topics') out = lsOut();
         else if (/^open\s+\d+$/.test(m)) {
@@ -1218,11 +1313,18 @@
             syncChrome();
             out = [line('mode → light', 'cad-faint')];
         }
+        else if (m === 'compact') {
+            store.compact = !store.compact;
+            out = [line('compact → ' + (store.compact ? 'on' : 'off'), 'cad-faint')];
+        }
+        else if (m === 'pause') { toggleCover(); return; }
         else if (m === 'img' || m === 'images') {
             store.img = !store.img;
             out = [line(`images → ${store.img ? 'on（显示图片）' : 'off（[image] 占位）'}`, 'cad-faint')];
         }
         else if (m === 'op' || m === 'op only') {
+            cancelPageRequest();
+            autoPageError = false;
             store.opOnly = !store.opOnly;
             opNextNo = null;   // 切模式后 op 页链重新初始化
             opEnd = false;
@@ -1238,6 +1340,7 @@
         }
         else if (m === 'autopage' || m === 'auto page') {
             store.autopage = !store.autopage;
+            if (!store.autopage) cancelPageRequest();
             if (store.autopage) maybeAutoLoad();
             out = [line(`autopage → ${store.autopage ? 'on（滚到底自动加载下一页）' : 'off'}`, 'cad-faint')];
         }
@@ -1273,7 +1376,7 @@
     /* html.cad-on 控制原页隐藏；root class 控制主题变量 */
     const applyAttrs = () => {
         document.documentElement.classList.toggle('cad-on', store.on);
-        if (root) root.className = `cad-${store.style} cad-${store.mode}`;
+        if (root) root.className = `cad-${store.style} cad-${store.mode}${covered ? ' cad-covered' : ''}`;
     };
 
     /* 廉价签名：href + 容器 id + 结构计数（不含文本长度 —— 广告/赞数等文本级变动不再触发重渲染） */
@@ -1352,6 +1455,8 @@
     };
 
     const toggleDisguise = () => {
+        cancelPageRequest();
+        covered = false;
         store.on = !store.on;
         if (store.on) {
             build();
@@ -1367,14 +1472,22 @@
     /* ================= 全局键位 ================= */
     let pendingCount = '';
     document.addEventListener('keydown', e => {
+        if (e.isComposing || e.keyCode === 229) return;
+        if (store.on && covered) {
+            if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); toggleCover(); }
+            else if (e.key === '`' || e.code === 'Backquote') { e.preventDefault(); e.stopImmediatePropagation(); }
+            return;
+        }
         // 输入栏内部事件由 onInputKey 处理（且已 stopPropagation）
         if (e.target && e.target.classList && e.target.classList.contains('cad-real')) return;
+        if (e.target && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) return;
         if (e.key === '`' || e.code === 'Backquote') {
             e.preventDefault();
             toggleDisguise();
             return;
         }
         if (!store.on) return;
+        if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); toggleCover(); return; }
         if (e.ctrlKey && (e.key === 'o' || e.key === 'O')) {
             e.preventDefault();
             store.expand = !store.expand;
@@ -1456,18 +1569,46 @@
         }).observe(t, { childList: true, characterData: true, subtree: true });
     };
 
-    setInterval(() => { if (store.on) refresh(false); }, 1200);
+    // 只监听源页面，跳过自身 diff；纯文本更新也能刷新，不再每 1.2 秒扫描全页。
+    let sourceDirty = false, sourceTimer = null;
+    const scheduleRefresh = () => {
+        sourceDirty = true;
+        if (sourceTimer || !store.on || covered || document.hidden) return;
+        sourceTimer = setTimeout(() => {
+            sourceTimer = null;
+            if (!store.on || covered || document.hidden) return;
+            sourceDirty = false;
+            refresh(true);
+        }, 180);
+    };
+    const watchSource = () => {
+        new MutationObserver(records => {
+            if (records.some(r => {
+                const el = r.target.nodeType === 1 ? r.target : r.target.parentElement;
+                return el && !root?.contains(el) && (el.closest('#m_posts, #m_threads, #m_nav, #m_pbtnbtm, #m_pbtntop, #pagebbtm, #pagebbtop')
+                    || [...r.addedNodes, ...r.removedNodes].some(n => n.nodeType === 1 && (n.matches('#m_posts, #m_threads') || n.querySelector('#m_posts, #m_threads'))));
+            })) scheduleRefresh();
+        }).observe(document.body, { childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['src', 'data-src', 'data-lazy-src', 'data-original', 'href'] });
+    };
+    // history.pushState 没有标准事件；这里只比较 URL，不扫描 DOM。
+    setInterval(() => { if (store.on && !covered && !document.hidden && (sourceDirty || location.href !== dataHref)) scheduleRefresh(); }, 1000);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) cancelPageRequest();
+        else { if (sourceDirty || location.href !== dataHref) scheduleRefresh(); maybeAutoLoad(); }
+    });
     /* 状态栏时钟：每 30s 轻量重渲染（Preact diff 成本极低） */
-    setInterval(() => { if (store.on && root) renderApp(); }, 30000);
+    setInterval(() => { if (store.on && root && !covered && !document.hidden) renderApp(); }, 30000);
 
     const boot = () => {
         realTitle = document.title || realTitle;
         watchTitle();
         stripTrackerErrors();
+        watchSource();
         if (store.on) {
             build();
             setFavicon(true);
         } else applyAttrs();
+        clearTimeout(startupGuard);
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
