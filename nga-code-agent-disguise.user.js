@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NGA Code Agent 伪装（Claude Code / Codex）
 // @namespace    https://github.com/zhaoyifan
-// @version      2.2.3
+// @version      2.3.1
 // @description  将 NGA 页面伪装成 Claude Code / Codex CLI 终端会话，旁人看来你在用 code agent。` 一键切换，? 帮助，输入栏可敲命令（search: 搜索 · board 切版 · help 查看全部），vim 键位。渲染层 Preact 重构
 // @author       zhaoyifan
 // @match        *://bbs.nga.cn/*
@@ -14,8 +14,17 @@
 // @grant        GM_getValue
 // ==/UserScript==
 
-(function () {
+(function startDisguise() {
     'use strict';
+
+    // document-start 不保证 <html> 已存在；测试和脚本管理器均可早于 DOM 运行。
+    if (!document.documentElement) {
+        const observer = new MutationObserver(() => {
+            if (document.documentElement) { observer.disconnect(); startDisguise(); }
+        });
+        observer.observe(document, { childList:true });
+        return;
+    }
 
     /* ================= 配置 ================= */
     const store = {
@@ -27,6 +36,7 @@
         get expand(){ return GM_getValue('cad_expand', false); },    // 展开全部截断楼层
         get vim()   { return GM_getValue('cad_vim', true); },        // vim 键位
         get autopage(){ return GM_getValue('cad_autopage', true); }, // 滚到底自动加载下一页
+        get compact(){ return GM_getValue('cad_compact', true); }, // 精简终端提示
         set on(v)    { GM_setValue('cad_on', v); },
         set style(v) { GM_setValue('cad_style', v); },
         set mode(v)  { GM_setValue('cad_mode', v); },
@@ -35,9 +45,22 @@
         set expand(v){ GM_setValue('cad_expand', v); },
         set vim(v)   { GM_setValue('cad_vim', v); },
         set autopage(v){ GM_setValue('cad_autopage', v); },
+        set compact(v){ GM_setValue('cad_compact', v); },
     };
 
     const FAKE_DIR  = '~/projects/api-server';
+    const COVER_TEXT = `src/server.ts
+  ✓ Validate request parameters before dispatch
+  ✓ Propagate cancellation to downstream handlers
+  ✓ Return consistent errors at the API boundary
+
+async function handleRequest(request, context) {
+  const input = validate(request);
+  const result = await service.execute(input, {
+    signal: context.signal,
+  });
+  return response.ok(result);
+}`;
     const FAVICON = "data:image/svg+xml," + encodeURIComponent(
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#0d0d0d"/><text x="50" y="70" font-size="62" text-anchor="middle" fill="#fff" font-family="monospace">›</text></svg>`
     );
@@ -82,6 +105,30 @@
         background:var(--bg); color:var(--text);
         font-family:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,"Maple Mono NF CN","Sarasa Mono SC","Microsoft YaHei UI",monospace;
         font-size:14px; line-height:1.58; letter-spacing:0.25px;
+    }
+    #cad__root, #cad__root * { box-sizing:border-box; }
+    #cad__root button { font:inherit; }
+    #cad__root a:focus-visible, #cad__root button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+    #cad__root .cad-body { min-height:0; overflow-x:hidden; overscroll-behavior:contain; }
+    .cad-windowtitle { margin:auto; color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .cad-topbar { border-bottom:1px solid var(--border); min-height:30px; }
+    .cad-action { border:0; background:none; color:var(--dim); cursor:pointer; padding:2px 6px; }
+    .cad-action:hover { color:var(--accent2); }
+    .cad-topbar .cad-action { font-size:11px; }
+    .cad-covered > .cad-body, .cad-covered > .cad-inputbar, .cad-covered > .cad-statusbar { display:none; }
+    .cad-cover { flex:1; overflow:auto; padding:24px; white-space:pre-wrap; }
+    .cad-cover-code { color:var(--dim); line-height:1.8; }
+    .cad-expand { display:block; font-size:12px !important; padding-left:0; margin-top:4px; }
+    .cad-trow { display:grid; grid-template-columns:38px 52px minmax(0,1fr); column-gap:0; }
+    .cad-trow .cad-meta { grid-column:3; font-size:11px; }
+    .cad-trow .cad-tlink { min-width:0; }
+    .cad-inputbar > .cad-faint { max-width:35%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .cad-statusbar { overflow:hidden; white-space:nowrap; }
+    @media (prefers-reduced-motion:reduce) { .cad-cursor { animation:none; } }
+    @media (max-width:760px) {
+        .cad-statusbar .cad-secondary { display:none; }
+        .cad-topbar { padding:0 8px; }
+        .cad-inputbar > .cad-faint { display:none; }
     }
 
     /* 顶部极简窗口点 */
@@ -227,6 +274,11 @@
         }
     };
     injectStyle();
+    // document-start 即隐藏原页，避免刷新时闪出论坛；启动失败时自动恢复。
+    if (store.on) document.documentElement.classList.add('cad-on');
+    const startupGuard = setTimeout(() => {
+        if (!document.querySelector('#cad__root .cad-real')) document.documentElement.classList.remove('cad-on');
+    }, 4000);
 
     /* 保险：移除页面可能的 meta 自动刷新（head 未解析完时用观察者兜底） */
     const stripMetaRefresh = () => {
@@ -241,13 +293,20 @@
     };
     stripMetaRefresh();
 
+    // 私有 CommonJS 作用域：不读写页面的 preact/htm，也不走页面 AMD loader。
+    const vendored = (() => {
+        const exports = {};
+        const module = { exports };
     // ===== vendored: preact 10.24.3 UMD (MIT, https://github.com/preactjs/preact) =====
 !function(n,l){"object"==typeof exports&&"undefined"!=typeof module?l(exports):"function"==typeof define&&define.amd?define(["exports"],l):l((n||self).preact={})}(this,function(n){var l,t,u,i,o,e,r,f,c,s,h,a,p=65536,v=1<<17,d={},y=[],w=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine[ch]|zoo|^ord|itera/i,_=Array.isArray;function g(n,l){for(var t in l)n[t]=l[t];return n}function b(n){n&&n.parentNode&&n.parentNode.removeChild(n)}function m(n,t,u){var i,o,e,r={};for(e in t)"key"==e?i=t[e]:"ref"==e?o=t[e]:r[e]=t[e];if(arguments.length>2&&(r.children=arguments.length>3?l.call(arguments,2):u),"function"==typeof n&&null!=n.defaultProps)for(e in n.defaultProps)void 0===r[e]&&(r[e]=n.defaultProps[e]);return k(n,r,i,o,null)}function k(n,l,i,o,e){var r={type:n,props:l,key:i,ref:o,__k:null,__:null,__b:0,__e:null,__d:void 0,__c:null,constructor:void 0,__v:null==e?++u:e,__i:-1,__u:0};return null==e&&null!=t.vnode&&t.vnode(r),r}function x(n){return n.children}function S(n,l){this.props=n,this.context=l}function C(n,l){if(null==l)return n.__?C(n.__,n.__i+1):null;for(var t;l<n.__k.length;l++)if(null!=(t=n.__k[l])&&null!=t.__e)return t.__e;return"function"==typeof n.type?C(n):null}function M(n){var l,t;if(null!=(n=n.__)&&null!=n.__c){for(n.__e=n.__c.base=null,l=0;l<n.__k.length;l++)if(null!=(t=n.__k[l])&&null!=t.__e){n.__e=n.__c.base=t.__e;break}return M(n)}}function P(n){(!n.__d&&(n.__d=!0)&&o.push(n)&&!T.__r++||e!==t.debounceRendering)&&((e=t.debounceRendering)||r)(T)}function T(){var n,l,u,i,e,r,c,s;for(o.sort(f);n=o.shift();)n.__d&&(l=o.length,i=void 0,r=(e=(u=n).__v).__e,c=[],s=[],u.__P&&((i=g({},e)).__v=e.__v+1,t.vnode&&t.vnode(i),O(u.__P,i,e,u.__n,u.__P.namespaceURI,32&e.__u?[r]:null,c,null==r?C(e):r,!!(32&e.__u),s),i.__v=e.__v,i.__.__k[i.__i]=i,z(c,i,s),i.__e!=r&&M(i)),o.length>l&&o.sort(f));T.__r=0}function $(n,l,t,u,i,o,e,r,f,c,s){var h,a,v,w,_,g=u&&u.__k||y,b=l.length;for(t.__d=f,I(t,l,g),f=t.__d,h=0;h<b;h++)null!=(v=t.__k[h])&&(a=-1===v.__i?d:g[v.__i]||d,v.__i=h,O(n,v,a,i,o,e,r,f,c,s),w=v.__e,v.ref&&a.ref!=v.ref&&(a.ref&&V(a.ref,null,v),s.push(v.ref,v.__c||w,v)),null==_&&null!=w&&(_=w),v.__u&p||a.__k===v.__k?f=H(v,f,n):"function"==typeof v.type&&void 0!==v.__d?f=v.__d:w&&(f=w.nextSibling),v.__d=void 0,v.__u&=-196609);t.__d=f,t.__e=_}function I(n,l,t){var u,i,o,e,r,f=l.length,c=t.length,s=c,h=0;for(n.__k=[],u=0;u<f;u++)null!=(i=l[u])&&"boolean"!=typeof i&&"function"!=typeof i?(e=u+h,(i=n.__k[u]="string"==typeof i||"number"==typeof i||"bigint"==typeof i||i.constructor==String?k(null,i,null,null,null):_(i)?k(x,{children:i},null,null,null):void 0===i.constructor&&i.__b>0?k(i.type,i.props,i.key,i.ref?i.ref:null,i.__v):i).__=n,i.__b=n.__b+1,o=null,-1!==(r=i.__i=L(i,t,e,s))&&(s--,(o=t[r])&&(o.__u|=v)),null==o||null===o.__v?(-1==r&&h--,"function"!=typeof i.type&&(i.__u|=p)):r!==e&&(r==e-1?h--:r==e+1?h++:(r>e?h--:h++,i.__u|=p))):i=n.__k[u]=null;if(s)for(u=0;u<c;u++)null!=(o=t[u])&&0==(o.__u&v)&&(o.__e==n.__d&&(n.__d=C(o)),q(o,o))}function H(n,l,t){var u,i;if("function"==typeof n.type){for(u=n.__k,i=0;u&&i<u.length;i++)u[i]&&(u[i].__=n,l=H(u[i],l,t));return l}n.__e!=l&&(l&&n.type&&!t.contains(l)&&(l=C(n)),t.insertBefore(n.__e,l||null),l=n.__e);do{l=l&&l.nextSibling}while(null!=l&&8===l.nodeType);return l}function L(n,l,t,u){var i=n.key,o=n.type,e=t-1,r=t+1,f=l[t];if(null===f||f&&i==f.key&&o===f.type&&0==(f.__u&v))return t;if(u>(null!=f&&0==(f.__u&v)?1:0))for(;e>=0||r<l.length;){if(e>=0){if((f=l[e])&&0==(f.__u&v)&&i==f.key&&o===f.type)return e;e--}if(r<l.length){if((f=l[r])&&0==(f.__u&v)&&i==f.key&&o===f.type)return r;r++}}return-1}function j(n,l,t){"-"===l[0]?n.setProperty(l,null==t?"":t):n[l]=null==t?"":"number"!=typeof t||w.test(l)?t:t+"px"}function A(n,l,t,u,i){var o;n:if("style"===l)if("string"==typeof t)n.style.cssText=t;else{if("string"==typeof u&&(n.style.cssText=u=""),u)for(l in u)t&&l in t||j(n.style,l,"");if(t)for(l in t)u&&t[l]===u[l]||j(n.style,l,t[l])}else if("o"===l[0]&&"n"===l[1])o=l!==(l=l.replace(/(PointerCapture)$|Capture$/i,"$1")),l=l.toLowerCase()in n||"onFocusOut"===l||"onFocusIn"===l?l.toLowerCase().slice(2):l.slice(2),n.l||(n.l={}),n.l[l+o]=t,t?u?t.t=u.t:(t.t=c,n.addEventListener(l,o?h:s,o)):n.removeEventListener(l,o?h:s,o);else{if("http://www.w3.org/2000/svg"==i)l=l.replace(/xlink(H|:h)/,"h").replace(/sName$/,"s");else if("width"!=l&&"height"!=l&&"href"!=l&&"list"!=l&&"form"!=l&&"tabIndex"!=l&&"download"!=l&&"rowSpan"!=l&&"colSpan"!=l&&"role"!=l&&"popover"!=l&&l in n)try{n[l]=null==t?"":t;break n}catch(n){}"function"==typeof t||(null==t||!1===t&&"-"!==l[4]?n.removeAttribute(l):n.setAttribute(l,"popover"==l&&1==t?"":t))}}function F(n){return function(l){if(this.l){var u=this.l[l.type+n];if(null==l.u)l.u=c++;else if(l.u<u.t)return;return u(t.event?t.event(l):l)}}}function O(n,l,u,i,o,e,r,f,c,s){var h,a,p,v,d,y,w,b,m,k,C,M,P,T,I,H,L=l.type;if(void 0!==l.constructor)return null;128&u.__u&&(c=!!(32&u.__u),e=[f=l.__e=u.__e]),(h=t.__b)&&h(l);n:if("function"==typeof L)try{if(b=l.props,m="prototype"in L&&L.prototype.render,k=(h=L.contextType)&&i[h.__c],C=h?k?k.props.value:h.__:i,u.__c?w=(a=l.__c=u.__c).__=a.__E:(m?l.__c=a=new L(b,C):(l.__c=a=new S(b,C),a.constructor=L,a.render=B),k&&k.sub(a),a.props=b,a.state||(a.state={}),a.context=C,a.__n=i,p=a.__d=!0,a.__h=[],a._sb=[]),m&&null==a.__s&&(a.__s=a.state),m&&null!=L.getDerivedStateFromProps&&(a.__s==a.state&&(a.__s=g({},a.__s)),g(a.__s,L.getDerivedStateFromProps(b,a.__s))),v=a.props,d=a.state,a.__v=l,p)m&&null==L.getDerivedStateFromProps&&null!=a.componentWillMount&&a.componentWillMount(),m&&null!=a.componentDidMount&&a.__h.push(a.componentDidMount);else{if(m&&null==L.getDerivedStateFromProps&&b!==v&&null!=a.componentWillReceiveProps&&a.componentWillReceiveProps(b,C),!a.__e&&(null!=a.shouldComponentUpdate&&!1===a.shouldComponentUpdate(b,a.__s,C)||l.__v===u.__v)){for(l.__v!==u.__v&&(a.props=b,a.state=a.__s,a.__d=!1),l.__e=u.__e,l.__k=u.__k,l.__k.some(function(n){n&&(n.__=l)}),M=0;M<a._sb.length;M++)a.__h.push(a._sb[M]);a._sb=[],a.__h.length&&r.push(a);break n}null!=a.componentWillUpdate&&a.componentWillUpdate(b,a.__s,C),m&&null!=a.componentDidUpdate&&a.__h.push(function(){a.componentDidUpdate(v,d,y)})}if(a.context=C,a.props=b,a.__P=n,a.__e=!1,P=t.__r,T=0,m){for(a.state=a.__s,a.__d=!1,P&&P(l),h=a.render(a.props,a.state,a.context),I=0;I<a._sb.length;I++)a.__h.push(a._sb[I]);a._sb=[]}else do{a.__d=!1,P&&P(l),h=a.render(a.props,a.state,a.context),a.state=a.__s}while(a.__d&&++T<25);a.state=a.__s,null!=a.getChildContext&&(i=g(g({},i),a.getChildContext())),m&&!p&&null!=a.getSnapshotBeforeUpdate&&(y=a.getSnapshotBeforeUpdate(v,d)),$(n,_(H=null!=h&&h.type===x&&null==h.key?h.props.children:h)?H:[H],l,u,i,o,e,r,f,c,s),a.base=l.__e,l.__u&=-161,a.__h.length&&r.push(a),w&&(a.__E=a.__=null)}catch(n){if(l.__v=null,c||null!=e){for(l.__u|=c?160:128;f&&8===f.nodeType&&f.nextSibling;)f=f.nextSibling;e[e.indexOf(f)]=null,l.__e=f}else l.__e=u.__e,l.__k=u.__k;t.__e(n,l,u)}else null==e&&l.__v===u.__v?(l.__k=u.__k,l.__e=u.__e):l.__e=N(u.__e,l,u,i,o,e,r,c,s);(h=t.diffed)&&h(l)}function z(n,l,u){l.__d=void 0;for(var i=0;i<u.length;i++)V(u[i],u[++i],u[++i]);t.__c&&t.__c(l,n),n.some(function(l){try{n=l.__h,l.__h=[],n.some(function(n){n.call(l)})}catch(n){t.__e(n,l.__v)}})}function N(n,u,i,o,e,r,f,c,s){var h,a,p,v,y,w,g,m=i.props,k=u.props,x=u.type;if("svg"===x?e="http://www.w3.org/2000/svg":"math"===x?e="http://www.w3.org/1998/Math/MathML":e||(e="http://www.w3.org/1999/xhtml"),null!=r)for(h=0;h<r.length;h++)if((y=r[h])&&"setAttribute"in y==!!x&&(x?y.localName===x:3===y.nodeType)){n=y,r[h]=null;break}if(null==n){if(null===x)return document.createTextNode(k);n=document.createElementNS(e,x,k.is&&k),c&&(t.__m&&t.__m(u,r),c=!1),r=null}if(null===x)m===k||c&&n.data===k||(n.data=k);else{if(r=r&&l.call(n.childNodes),m=i.props||d,!c&&null!=r)for(m={},h=0;h<n.attributes.length;h++)m[(y=n.attributes[h]).name]=y.value;for(h in m)if(y=m[h],"children"==h);else if("dangerouslySetInnerHTML"==h)p=y;else if(!(h in k)){if("value"==h&&"defaultValue"in k||"checked"==h&&"defaultChecked"in k)continue;A(n,h,null,y,e)}for(h in k)y=k[h],"children"==h?v=y:"dangerouslySetInnerHTML"==h?a=y:"value"==h?w=y:"checked"==h?g=y:c&&"function"!=typeof y||m[h]===y||A(n,h,y,m[h],e);if(a)c||p&&(a.__html===p.__html||a.__html===n.innerHTML)||(n.innerHTML=a.__html),u.__k=[];else if(p&&(n.innerHTML=""),$(n,_(v)?v:[v],u,i,o,"foreignObject"===x?"http://www.w3.org/1999/xhtml":e,r,f,r?r[0]:i.__k&&C(i,0),c,s),null!=r)for(h=r.length;h--;)b(r[h]);c||(h="value","progress"===x&&null==w?n.removeAttribute("value"):void 0!==w&&(w!==n[h]||"progress"===x&&!w||"option"===x&&w!==m[h])&&A(n,h,w,m[h],e),h="checked",void 0!==g&&g!==n[h]&&A(n,h,g,m[h],e))}return n}function V(n,l,u){try{if("function"==typeof n){var i="function"==typeof n.__u;i&&n.__u(),i&&null==l||(n.__u=n(l))}else n.current=l}catch(n){t.__e(n,u)}}function q(n,l,u){var i,o;if(t.unmount&&t.unmount(n),(i=n.ref)&&(i.current&&i.current!==n.__e||V(i,null,l)),null!=(i=n.__c)){if(i.componentWillUnmount)try{i.componentWillUnmount()}catch(n){t.__e(n,l)}i.base=i.__P=null}if(i=n.__k)for(o=0;o<i.length;o++)i[o]&&q(i[o],l,u||"function"!=typeof n.type);u||b(n.__e),n.__c=n.__=n.__e=n.__d=void 0}function B(n,l,t){return this.constructor(n,t)}function D(n,u,i){var o,e,r,f;t.__&&t.__(n,u),e=(o="function"==typeof i)?null:i&&i.__k||u.__k,r=[],f=[],O(u,n=(!o&&i||u).__k=m(x,null,[n]),e||d,d,u.namespaceURI,!o&&i?[i]:e?null:u.firstChild?l.call(u.childNodes):null,r,!o&&i?i:e?e.__e:u.firstChild,o,f),z(r,n,f)}l=y.slice,t={__e:function(n,l,t,u){for(var i,o,e;l=l.__;)if((i=l.__c)&&!i.__)try{if((o=i.constructor)&&null!=o.getDerivedStateFromError&&(i.setState(o.getDerivedStateFromError(n)),e=i.__d),null!=i.componentDidCatch&&(i.componentDidCatch(n,u||{}),e=i.__d),e)return i.__E=i}catch(l){n=l}throw n}},u=0,i=function(n){return null!=n&&null==n.constructor},S.prototype.setState=function(n,l){var t;t=null!=this.__s&&this.__s!==this.state?this.__s:this.__s=g({},this.state),"function"==typeof n&&(n=n(g({},t),this.props)),n&&g(t,n),null!=n&&this.__v&&(l&&this._sb.push(l),P(this))},S.prototype.forceUpdate=function(n){this.__v&&(this.__e=!0,n&&this.__h.push(n),P(this))},S.prototype.render=x,o=[],r="function"==typeof Promise?Promise.prototype.then.bind(Promise.resolve()):setTimeout,f=function(n,l){return n.__v.__b-l.__v.__b},T.__r=0,c=0,s=F(!1),h=F(!0),a=0,n.Component=S,n.Fragment=x,n.cloneElement=function(n,t,u){var i,o,e,r,f=g({},n.props);for(e in n.type&&n.type.defaultProps&&(r=n.type.defaultProps),t)"key"==e?i=t[e]:"ref"==e?o=t[e]:f[e]=void 0===t[e]&&void 0!==r?r[e]:t[e];return arguments.length>2&&(f.children=arguments.length>3?l.call(arguments,2):u),k(n.type,f,i||n.key,o||n.ref,null)},n.createContext=function(n,l){var t={__c:l="__cC"+a++,__:n,Consumer:function(n,l){return n.children(l)},Provider:function(n){var t,u;return this.getChildContext||(t=new Set,(u={})[l]=this,this.getChildContext=function(){return u},this.componentWillUnmount=function(){t=null},this.shouldComponentUpdate=function(n){this.props.value!==n.value&&t.forEach(function(n){n.__e=!0,P(n)})},this.sub=function(n){t.add(n);var l=n.componentWillUnmount;n.componentWillUnmount=function(){t&&t.delete(n),l&&l.call(n)}}),n.children}};return t.Provider.__=t.Consumer.contextType=t},n.createElement=m,n.createRef=function(){return{current:null}},n.h=m,n.hydrate=function n(l,t){D(l,t,n)},n.isValidElement=i,n.options=t,n.render=D,n.toChildArray=function n(l,t){return t=t||[],null==l||"boolean"==typeof l||(_(l)?l.some(function(l){n(l,t)}):t.push(l)),t}});
 //# sourceMappingURL=preact.umd.js.map
 
+    const preact = module.exports;
     // ===== vendored: htm 3.1.1 UMD (MIT, https://github.com/developit/htm) =====
 !function(n,e){"object"==typeof exports&&"undefined"!=typeof module?module.exports=e():"function"==typeof define&&define.amd?define(e):(n||self).htm=e()}(this,function(){var n=function(e,t,u,s){var r;t[0]=0;for(var p=1;p<t.length;p++){var h=t[p++],o=t[p]?(t[0]|=h?1:2,u[t[p++]]):t[++p];3===h?s[0]=o:4===h?s[1]=Object.assign(s[1]||{},o):5===h?(s[1]=s[1]||{})[t[++p]]=o:6===h?s[1][t[++p]]+=o+"":h?(r=e.apply(o,n(e,o,u,["",null])),s.push(r),o[0]?t[0]|=2:(t[p-2]=0,t[p]=r)):s.push(o)}return s},e=new Map;return function(t){var u=e.get(this);return u||(u=new Map,e.set(this,u)),(u=n(this,u.get(t)||(u.set(t,u=function(n){for(var e,t,u=1,s="",r="",p=[0],h=function(n){1===u&&(n||(s=s.replace(/^\s*\n\s*|\s*\n\s*$/g,"")))?p.push(0,n,s):3===u&&(n||s)?(p.push(3,n,s),u=2):2===u&&"..."===s&&n?p.push(4,n,0):2===u&&s&&!n?p.push(5,0,!0,s):u>=5&&((s||!n&&5===u)&&(p.push(u,0,s,t),u=6),n&&(p.push(u,n,0,t),u=6)),s=""},o=0;o<n.length;o++){o&&(1===u&&h(),h(o));for(var f=0;f<n[o].length;f++)e=n[o][f],1===u?"<"===e?(h(),p=[p],u=3):s+=e:4===u?"--"===s&&">"===e?(u=1,s=""):s=e+s[0]:r?e===r?r="":s+=e:'"'===e||"'"===e?r=e:">"===e?(h(),u=1):u&&("="===e?(u=5,t=s,s=""):"/"===e&&(u<5||">"===n[o][f+1])?(h(),3===u&&(p=p[0]),u=p,(p=p[0]).push(2,0,u),u=0):" "===e||"\t"===e||"\n"===e||"\r"===e?(h(),u=2):s+=e),3===u&&"!--"===s&&(u=4,p=p[0])}return h(),p}(t)),u),arguments,[])).length>1?u:u[0]}});
 
+        return { preact, htm: module.exports };
+    })();
     // ===== end vendored =====
 
 
@@ -259,6 +318,10 @@
     let dataHref = '';           // lastData 锚定的 URL（无限滚动合并判断）
     let typed = '';              // 输入栏受控文本
     let focused = false;         // 输入栏是否聚焦（控制假光标显示）
+    let covered = false;
+    let coverFocus = false;
+    const expandedPosts = new Set();
+    let pageRequest = null;
     let gTs = 0;                 // vim gg 等待窗口
     let autoPageLoading = false; // 下一页抓取中
     let autoPageError = false;   // 上次抓取失败（显示重试入口）
@@ -278,16 +341,9 @@
     /* esc 仅服务于命令层输出的 HTML 串（line()）；组件层由 Preact 自动转义，不需要它 */
     const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    /* 截断：store.expand 时全量展开；提示与真实的 ctrl+o 快捷键对应 */
-    const truncate = (s, n) => {
-        if (store.expand) return s;
-        const lines = s.split('\n');
-        const joined = lines.slice(0, n).join('\n');
-        return lines.length > n ? joined + `\n… +${lines.length - n} lines (ctrl+o to expand)` : joined;
-    };
-
     /* 伪 shell 工作目录 */
     const cwdFor = data => {
+        if (store.compact) return FAKE_DIR;
         if (data.kind === 'posts') return `~/threads/${(location.href.match(/tid=(\d+)/) || [])[1] || 'latest'}`;
         if (data.kind === 'topics') return `~/boards/${(data.board || 'board').replace(/\s+/g, '-')}`;
         return '~';
@@ -313,41 +369,50 @@
     /* 不可见字符清理 + 去除空首行（NGA 会塞 ZWSP） */
     const cleanText = s => {
         // ZWSP (U+200B) 用 fromCharCode 引用，源码里不放不可见字符
-        const lines = s.split(String.fromCharCode(0x200b)).join('').split('\n').map(l => l.trim());
+        const lines = (s || '').split(String.fromCharCode(0x200b)).join('').split('\n').map(l => l.trimEnd());
         const invis = /^\s*$/;   // JS \s 本身覆盖 U+00A0 / U+3000
         while (lines.length && invis.test(lines[0])) lines.shift();
         while (lines.length && invis.test(lines[lines.length - 1])) lines.pop();
         return lines.join('\n').replace(/\n{3,}/g, '\n\n');
     };
 
+    // innerText 在 detached/隐藏 DOM 上不保留 br、块级边界；显式序列化，保留代码缩进。
+    const plainText = node => {
+        const blocks = /^(DIV|P|PRE|BLOCKQUOTE|LI|UL|OL|TABLE|TR|H[1-6])$/;
+        const walk = n => {
+            if (n.nodeType === 3) return n.nodeValue;
+            if (n.nodeType !== 1) return '';
+            if (/^(SCRIPT|STYLE)$/.test(n.tagName)) return '';
+            if (n.tagName === 'BR') return '\n';
+            const value = [...n.childNodes].map(walk).join('');
+            return blocks.test(n.tagName) ? '\n' + value + '\n' : value;
+        };
+        return cleanText(walk(node));
+    };
+
     /* 正文抽取：返回 { text, imgs }。
        显示图片时，正文图替换为占位 token %%IMGN%%（N = imgs 下标），
        渲染阶段按 token 把图片插回原始位置，不再全部堆到文字后面。 */
-    const contentText = (node, showImg) => {
+    const contentText = node => {
         if (!node) return { text: '', imgs: [] };
         const clone = node.cloneNode(true);
         // 引用块单独抽取，此处移除避免混入正文
         clone.querySelectorAll('.quote').forEach(q => q.remove());
         const imgs = [];
         clone.querySelectorAll('img').forEach(i => {
-            const src = i.getAttribute('src') || '';
             if (isEmote(i)) {
                 const alt = i.getAttribute('alt');
                 i.replaceWith(alt ? `[${alt}]` : '');
-            } else if (/about:blank|loading|spacer|placeholder/i.test(src)) {
-                i.remove(); // 追踪图/占位图，静默移除
-            } else if (showImg) {
+            } else {
                 const o = imgSrc(i);
                 if (!o.main) { i.remove(); return; }
                 imgs.push(o);
                 i.replaceWith(`%%IMG${imgs.length - 1}%%`);
-            } else {
-                i.replaceWith('[image]');
             }
         });
         // 点赞数、操作按钮等噪声
         clone.querySelectorAll('script,style,button,.recommendvalue,.ogoodbtn,.postBtnPos,.postinfo,.single_ttip2,.postbtnsc,.right_').forEach(i => i.remove());
-        return { text: cleanText(clone.innerText), imgs };
+        return { text: plainText(clone), imgs };
     };
 
     /* 记录真实标题，避免被伪装标题污染 */
@@ -431,7 +496,7 @@
                     const alt = im.getAttribute('alt');
                     isEmote(im) ? im.replaceWith(alt ? `[${alt}]` : '') : im.remove();
                 });
-                return { depth, text: cleanText(c.innerText) };
+                return { depth, text: plainText(c) };
             }).filter(q => q.text)
             : [];
         const head = [
@@ -440,8 +505,10 @@
             dateM && dateM[0],
             likes && likes !== '0' ? `+${likes}` : '',
         ].filter(Boolean).join(' · ');
-        const body = contentText(content, store.img);
-        return { head, uid, isOP, text: body.text, imgs: body.imgs, quotes };
+        const body = contentText(content);
+        // DOM id 可能在每页重新编号；楼号 + 用户更稳定，也不会受点赞数变化影响。
+        const id = floorM ? `floor:${floorM[1]}:${uid}` : [uid, dateM && dateM[0], body.text].join('|');
+        return { id, head, uid, isOP, text: body.text, imgs: body.imgs, quotes };
     };
 
     /* 按「热点回复」文字定位热楼容器（NGA 该模块 id/class 不稳定） */
@@ -471,7 +538,9 @@
         const boxes = allBoxes.filter(b => !hotBoxes.some(hb => hb === b || hb.contains(b)));
         if (!boxes.length) return null;
         // 首楼 UID 即楼主（追加页用 override）
-        const opUid = opUidOverride !== undefined ? opUidOverride : postUid(boxes[0]);
+        const markedOP = boxes.find(b => /楼主/.test(text(b.querySelector('.posterinfo .author, .posterInfoLine .author, [id^="postauthor"]'))));
+        const opUid = opUidOverride !== undefined ? opUidOverride
+            : (opUidTid === curTid() && opUidSticky) || (markedOP ? postUid(markedOP) : curPageNo() <= 1 ? postUid(boxes[0]) : '');
         const posts = boxes.map((b, i) => parsePost(b, i, opUid));
         // 1 楼正文首行常与标题重复，去掉（仅当前页首楼）
         if (opUidOverride === undefined && posts.length && posts[0].text.startsWith(title)) {
@@ -554,13 +623,13 @@
         if (locRenderTimer) return;
         locRenderTimer = setTimeout(() => {
             locRenderTimer = null;
-            if (store.on) renderApp();
+            if (store.on && !covered && !document.hidden) renderApp();
         }, 400);
     };
 
     /* ================= Preact 组件层 ================= */
-    const { h, render: preactRender } = self.preact;
-    const html = self.htm.bind(h);
+    const { h, render: preactRender } = vendored.preact;
+    const html = vendored.htm.bind(h);
 
     /* 图片：主源失败回退外层链接，再失败隐藏 */
     const Img = ({ o }) => html`<img class="cad-img" src=${o.main} loading="lazy" referrerpolicy="no-referrer"
@@ -574,9 +643,16 @@
 
     /* 正文：按 %%IMGN%% token 把图片插回原始位置（Preact 自动转义文本） */
     const PostBody = ({ p, maxLines }) => {
-        const parts = truncate(p.text, maxLines).split(/%%IMG(\d+)%%/);
+        const expanded = store.expand || expandedPosts.has(p.id);
+        const lines = p.text.split('\n');
+        const clipped = !expanded && lines.length > maxLines;
+        const parts = (clipped ? lines.slice(0, maxLines).join('\n') : p.text).split(/%%IMG(\d+)%%/);
         return html`<div class="cad-text cad-line">${parts.map((part, i) =>
-            i % 2 ? (p.imgs[+part] ? html`<${Img} o=${p.imgs[+part]} />` : null) : part)}</div>`;
+            i % 2 ? (p.imgs[+part] ? store.img ? html`<${Img} key=${p.imgs[+part].main} o=${p.imgs[+part]} />` : '[image]' : null) : part)}
+            ${lines.length > maxLines && !store.expand ? html`<button class="cad-action cad-expand" onClick=${() => {
+                if (expandedPosts.has(p.id)) expandedPosts.delete(p.id); else expandedPosts.add(p.id);
+                renderApp();
+            }}>${clipped ? '… +' + (lines.length - maxLines) + ' lines · expand' : '− collapse'}</button>` : null}</div>`;
     };
 
     const PostBlock = ({ p, maxLines }) => html`
@@ -591,15 +667,15 @@
     </div>` : null;
 
     /* ls -l 风列对齐：序号 | 回复数(右对齐定宽) | 标题 | 元信息 */
-    const TopicRow = ({ t, i, bullet }) => html`
+    const TopicRow = ({ t, i }) => html`
     <div class="cad-trow cad-line">
-        <span class="cad-topicnum">${i + 1}</span><span class="cad-trep">${t.replies || '0'}</span>${bullet ? html`<span class="cad-bullet"></span>` : null}<a class="cad-tlink" href=${t.href}>${t.title}</a>
+        <span class="cad-topicnum">${i + 1}</span><span class="cad-trep">${t.replies || '0'}</span><a class="cad-tlink" href=${t.href}>${t.title}</a>
         <span class="cad-meta"> · ${t.author}${t.postDate ? ' ' + t.postDate : ''}${t.replyer ? ' · 最后 ' + t.replyer : ''}${t.replyDate ? ' ' + t.replyDate : ''}</span>
     </div>`;
 
     /* 收藏板块快捷栏：可见的板块切换入口（boards: 名字可点击，[+] 收藏当前版） */
     const BoardsBar = () => {
-        if (!boards.length) return null;
+        if (!boards.length || store.compact) return null;
         const cur = curFid();
         return html`
     <div class="cad-boards cad-line cad-faint">boards:${boards.map((b, i) => html` <a class="cad-pagelink${String(b.fid) === String(cur) ? ' cad-boardcur' : ''}" href=${'/thread.php?fid=' + encodeURIComponent(b.fid)} title=${'board ' + (i + 1)}>${b.name}</a>`)}${cur ? html` <span class="cad-boardadd" title="board add 收藏当前版" onClick=${() => runCmd('board add')}>[+]</span>` : null}
@@ -609,7 +685,8 @@
     /* 伪 shell 命令回显行（视图顶部那条 band 背景行） */
     const CmdLine = ({ cwd, cmd }) => html`<div class="cad-cmd"><span class="cad-ps1">➜ ${cwd}</span> ${cmd}</div>`;
 
-    const Welcome = ({ cwd }) => html`
+    const Welcome = ({ cwd }) => store.compact ? html`
+    <div class="cad-banner"><b>✻ Claude Code</b><br />workspace: ${cwd}<br /><span class="cad-faint">Ready · ? for shortcuts</span></div>` : html`
     <div class="cad-welcome">
         <div class="left">
             <div class="logo">✻ Welcome to Claude Code</div>
@@ -626,7 +703,7 @@
     </div>`;
 
     const CodexBanner = () => html`
-    <div class="cad-banner"><b>OpenAI Codex</b> CLI v0.42.0 · model: <b>gpt-5-codex</b> · reasoning: medium · dir: ${FAKE_DIR} · approvals: on-request</div>`;
+    <div class="cad-banner"><b>› OpenAI Codex</b><br />model: <b>gpt-5-codex</b> · reasoning: medium<br />directory: ${FAKE_DIR}</div>`;
 
     const ClaudeView = ({ data }) => {
         const cwd = cwdFor(data);
@@ -634,23 +711,23 @@
             let tn = 0;
             return html`
         <${Welcome} cwd=${cwd} />
-        <${CmdLine} cwd=${cwd} cmd="ls" />
-        <div class="cad-line"><span class="cad-sect">${data.board}</span> <span class="cad-faint">· ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics</span></div>
-        ${data.topics.map(t => t.sep ? html`<${PageSep} label=${t.sep} />` : html`<${TopicRow} t=${t} i=${tn++} />`)}
+        <${CmdLine} cwd=${cwd} cmd=${store.compact ? 'rg --files src/' : 'ls'} />
+        <div class="cad-line"><span class="cad-sect">${store.compact ? 'workspace / index' : data.board}</span> <span class="cad-faint">· ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics</span></div>
+        ${data.topics.map(t => t.sep ? html`<${PageSep} key=${t.sep} label=${t.sep} />` : html`<${TopicRow} key=${t.href} t=${t} i=${tn++} />`)}
         <${Pager} pager=${data.pager} />`;
         }
         if (data.kind === 'posts') {
             const visible = store.opOnly ? data.posts.filter(p => p.isOP || p.sep) : data.posts;
             return html`
-        <${CmdLine} cwd=${cwd} cmd=${'open "' + data.title + '"'} />
-        <div class="cad-line cad-faint">thread: ${data.title} · ${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} replies${store.opOnly ? ' · OP only' : ''}</div>
+        <${CmdLine} cwd=${cwd} cmd=${store.compact ? 'cat notes/review.md' : 'open "' + data.title + '"'} />
+        <div class="cad-line cad-faint">${store.compact ? 'review' : 'thread'}: ${data.title} · ${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} replies${store.opOnly ? ' · OP only' : ''}</div>
         ${(!store.opOnly && data.hot && data.hot.length) ? html`
-        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">hot replies</span></div>
-        ${data.hot.map(p => html`<${PostBlock} p=${p} maxLines=${14} />`)}` : null}
-        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">all replies</span></div>
-        ${visible.map(p => p.sep ? html`<${PageSep} label=${p.sep} />` : html`<${PostBlock} p=${p} maxLines=${14} />`)}
+        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'highlights' : 'hot replies'}</span></div>
+        ${data.hot.map(p => html`<${PostBlock} key=${'hot-' + p.id} p=${p} maxLines=${14} />`)}` : null}
+        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'output' : 'all replies'}</span></div>
+        ${visible.map(p => p.sep ? html`<${PageSep} key=${p.sep} label=${p.sep} />` : html`<${PostBlock} key=${p.id} p=${p} maxLines=${14} />`)}
         <${Pager} pager=${data.pager} />
-        <div class="cad-line cad-faint" style="margin-top:8px">✻ Rendered ${visible.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} replies · next page / go page N 翻页 · ctrl+o ${store.expand ? '收起' : '展开'}截断</div>`;
+        <div class="cad-line cad-faint" style="margin-top:8px">✻ Rendered ${visible.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} entries${store.compact ? ' · ctrl+o to expand' : ' · next page / go page N 翻页 · ctrl+o 展开截断'}</div>`;
         }
         return html`<div class="cad-line cad-faint">⏵⏵ 此页面暂无可伪装的帖子/板块数据 — \` 退出伪装，F5 重试</div>`;
     };
@@ -662,28 +739,28 @@
             return html`
         <${CodexBanner} />
         <div class="cad-blocktag">user</div>
-        <div class="cad-line">列出板块「${data.board}」的帖子</div>
+        <div class="cad-line">${store.compact ? 'Inspect the workspace index' : '列出板块「' + data.board + '」的帖子'}</div>
         <div class="cad-blocktag">codex</div>
         <div class="cad-line cad-faint">cwd: ${cwd} · ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics</div>
-        ${data.topics.map(t => t.sep ? html`<${PageSep} label=${t.sep} />` : html`<${TopicRow} t=${t} i=${tn++} bullet=${true} />`)}
+        ${data.topics.map(t => t.sep ? html`<${PageSep} key=${t.sep} label=${t.sep} />` : html`<${TopicRow} key=${t.href} t=${t} i=${tn++} />`)}
         <${Pager} pager=${data.pager} />
-        <div class="cad-line cad-faint" style="margin-top:8px">Working… (esc to interrupt)</div>`;
+        <div class="cad-line cad-faint" style="margin-top:8px">Done · Esc to pause</div>`;
         }
         if (data.kind === 'posts') {
             const visible = store.opOnly ? data.posts.filter(p => p.isOP || p.sep) : data.posts;
             return html`
         <${CodexBanner} />
         <div class="cad-blocktag">user</div>
-        <div class="cad-line">打开帖子「${data.title}」</div>
+        <div class="cad-line">${store.compact ? 'Read notes/review.md' : '打开帖子「' + data.title + '」'}</div>
         <div class="cad-blocktag">codex</div>
         <div class="cad-line cad-faint">${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} replies${store.opOnly ? ' · OP only' : ''} · cwd: ${cwd}</div>
         ${(!store.opOnly && data.hot && data.hot.length) ? html`
-        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">hot replies</span></div>
-        ${data.hot.map(p => html`<${PostBlock} p=${p} maxLines=${12} />`)}` : null}
-        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">all replies</span></div>
-        ${visible.map(p => p.sep ? html`<${PageSep} label=${p.sep} />` : html`<${PostBlock} p=${p} maxLines=${12} />`)}
+        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'highlights' : 'hot replies'}</span></div>
+        ${data.hot.map(p => html`<${PostBlock} key=${'hot-' + p.id} p=${p} maxLines=${12} />`)}` : null}
+        <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'output' : 'all replies'}</span></div>
+        ${visible.map(p => p.sep ? html`<${PageSep} key=${p.sep} label=${p.sep} />` : html`<${PostBlock} key=${p.id} p=${p} maxLines=${12} />`)}
         <${Pager} pager=${data.pager} />
-        <div class="cad-line cad-faint" style="margin-top:8px">Working… (esc to interrupt)</div>`;
+        <div class="cad-line cad-faint" style="margin-top:8px">Done · Esc to pause</div>`;
         }
         return html`<${CodexBanner} /><div class="cad-line cad-faint">Idle — 此页面暂无可伪装数据，\` 退出伪装</div>`;
     };
@@ -696,7 +773,7 @@
     </div>`)}`;
 
     /* Tab 补全命令表（NEEDS_ARG 补全后自动带空格） */
-    const CMDS = ['help', 'search:', 'board', 'board list', 'board add', 'board del', 'board fid', 'next page', 'prev page', 'go page', 'open', 'ls', 'top', 'theme', 'claude', 'codex', 'dark', 'light', 'img', 'op', 'expand', 'vim', 'autopage', 'clear', 'exit', 'version', 'pwd', 'whoami'];
+    const CMDS = ['help', 'search:', 'board', 'board list', 'board add', 'board del', 'board fid', 'next page', 'prev page', 'go page', 'open', 'ls', 'top', 'theme', 'claude', 'codex', 'dark', 'light', 'img', 'op', 'expand', 'vim', 'autopage', 'compact', 'pause', 'clear', 'exit', 'version', 'pwd', 'whoami'];
     const NEEDS_ARG = new Set(['search:', 'board', 'board add', 'board del', 'board fid', 'go page', 'open']);
     const tabComplete = v => {
         const hits = CMDS.filter(c => c.startsWith(v.toLowerCase()));
@@ -717,11 +794,15 @@
         }
     };
 
-    /* 输入栏键盘逻辑：与全局快捷键隔离，Enter 执行命令，Tab 补全，↑↓ 历史，Esc 失焦，` 退出伪装 */
+    /* 输入栏键盘逻辑：与全局快捷键隔离，Enter 执行命令，Tab 补全，↑↓ 历史，Esc 遮屏，Ctrl+[ 失焦，` 退出伪装 */
     const onInputKey = e => {
         e.stopPropagation();
+        if (e.isComposing || e.keyCode === 229) return;
         const el = e.currentTarget;
+        if (e.ctrlKey && e.key === '[') { e.preventDefault(); el.blur(); return; }
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
         if (e.key === 'Enter') {
+            e.preventDefault();
             const v = el.value;
             typed = ''; histIdx = -1;
             renderApp();
@@ -730,8 +811,9 @@
             e.preventDefault();
             if (el.value) tabComplete(el.value);
         } else if (e.key === 'Escape') {
-            el.blur();
-        } else if (e.key === 'Backquote') {
+            e.preventDefault();
+            toggleCover();
+        } else if (e.key === '`' || e.code === 'Backquote') {
             e.preventDefault();
             toggleDisguise();
         } else if (e.key === 'ArrowUp') {
@@ -757,7 +839,7 @@
         <span class="cad-ps1">➜</span>
         <span class="cad-faint">${cwdFor(lastData || { kind: 'idle' })}</span>
         <span class="prompt">❯</span>
-        <input class="cad-real" ref=${el => { inputEl = el; }} value=${typed}
+        <input class="cad-real" aria-label="终端命令" placeholder="Type a command…" ref=${el => { inputEl = el; }} value=${typed}
             spellcheck="false" autocomplete="off" autocapitalize="off"
             onInput=${e => { typed = e.currentTarget.value; }}
             onKeyDown=${onInputKey}
@@ -771,12 +853,12 @@
         ${store.style === 'claude' ? html`
             <span class="seg hi">? for shortcuts</span><span class="sep">·</span><span class="seg">⏵⏵ accept edits</span>`
         : html`
-            <span class="seg hi">gpt-5-codex</span><span class="sep">|</span><span class="seg">94% context left</span><span class="sep">|</span><span class="seg">${FAKE_DIR}</span><span class="sep">|</span><span class="seg">? help</span>`}
+            <span class="seg hi">gpt-5-codex</span><span class="sep">|</span><span class="seg cad-secondary">${FAKE_DIR}</span><span class="seg">? help</span>`}
         <span class="grow"></span>
         ${(store.vim && pendingCount) ? html`<span class="seg hi">${pendingCount}</span><span class="sep">·</span>` : null}
         ${store.vim ? html`<span class="seg">vim</span><span class="sep">·</span>` : null}
         <span class="seg">${store.mode}</span>
-        <span class="cad-themeswitch" title="t 切换主题" onClick=${() => cycleTheme()}>${store.style}</span>
+        <button class="cad-action cad-themeswitch" title="t 切换主题" onClick=${() => cycleTheme()}>${store.style}</button>
         <span class="sep">·</span>
         <span class="seg">${new Date().toTimeString().slice(0, 5)}</span>
     </div>`;
@@ -797,8 +879,9 @@
     const App = () => {
         const data = lastData || { kind: 'idle' };
         return html`
-        <div class="cad-topbar"><i></i><i></i><i></i></div>
-        <div class="cad-body" id="cad__body" ref=${el => { bodyEl = el; }} onScroll=${onBodyScroll}>
+        <div key="chrome" class="cad-topbar"><i></i><i></i><i></i><span class="cad-windowtitle">${FAKE_DIR} — ${store.style === 'claude' ? 'claude' : 'codex'}</span><button class="cad-action" onClick=${toggleCover} title="Esc 临时遮屏 / 恢复">${covered ? 'Resume' : 'Esc'}</button></div>
+        ${covered ? html`<div key="cover" class="cad-cover"><div class="cad-banner"><b>${store.style === 'claude' ? '✻ Claude Code' : '› OpenAI Codex'}</b><br />${FAKE_DIR}</div><div class="cad-line cad-user">Review request handling and error paths</div><pre class="cad-cover-code">${COVER_TEXT}</pre><div class="cad-line cad-faint">Review complete. Waiting for input.</div></div>` : null}
+        <div key="content" class="cad-body" id="cad__body" ref=${el => { bodyEl = el; }} onScroll=${onBodyScroll}>
             <${BoardsBar} />
             ${store.style === 'claude' ? html`<${ClaudeView} data=${data} />` : html`<${CodexView} data=${data} />`}
             <${AutoLoadState} />
@@ -812,19 +895,45 @@
     let lastHref = location.href;
     const renderApp = () => {
         if (!root) return;
+        if (!root.isConnected && document.body) document.body.appendChild(root);
         const hrefChanged = location.href !== lastHref;
         lastHref = location.href;
         if (hrefChanged) {
+            cancelPageRequest();
+            expandedPosts.clear();
             autoPageError = false;
             autoPageLoading = false;
             loadedPages = new Set([location.href]);
             opNextNo = null;
             opEnd = false;
         }
+        root.classList.toggle('cad-covered', covered);
         preactRender(html`<${App} />`, root);
         if (hrefChanged && bodyEl) bodyEl.scrollTop = 0;
     };
-    const syncChrome = () => renderApp();
+    const syncChrome = () => { renderApp(); if (store.on) setFavicon(true); };
+
+    const cancelPageRequest = () => {
+        if (pageRequest) pageRequest.abort();
+        pageRequest = null;
+        autoPageLoading = false;
+    };
+
+    const toggleCover = () => {
+        if (!store.on) return;
+        covered = !covered;
+        if (covered) {
+            coverFocus = document.activeElement === inputEl;
+            cancelPageRequest();
+            if (inputEl) inputEl.blur();
+        }
+        renderApp();
+        if (!covered) {
+            if (sourceDirty || location.href !== dataHref) scheduleRefresh();
+            if (coverFocus && inputEl) inputEl.focus();
+            maybeAutoLoad();
+        }
+    };
 
     /* ================= 无限滚动（滚到底自动抓取下一页，内容接在下方） ================= */
     const findNextUrl = pager => {
@@ -871,13 +980,17 @@
             else autoPageError = true;
         };
         if (lastData.kind === 'posts') {
-            const opUid = opUidSticky || (lastData.posts.length ? lastData.posts[0].uid : undefined);
+            const opUid = opUidSticky || lastData.posts.find(p => p.isOP)?.uid || '';
             const data = extractPosts(doc, opUid);
             if (!data || !data.posts.length) { emptyFail('#m_posts'); return; }
-            // 防重复：与已有楼层重叠的一律剔除，零新增即到底
-            const seen = new Set(lastData.posts.filter(p => !p.sep).map(p => p.head));
-            const freshPosts = data.posts.filter(p => !seen.has(p.head));
-            if (!freshPosts.length) { end(); return; }
+            // 切入 authorid 分页时，第 1 页可能完全包含在当前普通页内，仍需继续第 2 页。
+            const seen = new Set(lastData.posts.filter(p => !p.sep).map(p => p.id));
+            const freshPosts = data.posts.filter(p => !seen.has(p.id));
+            if (!freshPosts.length) {
+                if (opMode && pageNo === 1 && !new URL(location.href).searchParams.has('authorid')) opNextNo = 2;
+                else end();
+                return;
+            }
             if (opMode) freshPosts.forEach(p => { p.isOP = true; });   // authorid 页整页都是楼主
             lastData.posts.push({ sep: label });
             lastData.posts.push(...freshPosts);
@@ -924,7 +1037,7 @@
     };
 
     const loadNextPage = () => {
-        if (autoPageLoading || !lastData || lastData.kind === 'idle') return;
+        if (!store.on || covered || document.hidden || autoPageLoading || !lastData || lastData.kind === 'idle') return;
         const opMode = opModeOn();
         if (opMode ? opEnd : !nextPageUrl) return;
         autoPageLoading = true;
@@ -935,25 +1048,30 @@
         }
         const fetchUrl = opMode ? authoridUrl(opNextNo) : nextPageUrl;
         const hrefAtStart = location.href;
+        const controller = new AbortController();
+        pageRequest = controller;
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        const isCurrent = () => pageRequest === controller && location.href === hrefAtStart && opMode === opModeOn();
         renderApp();
-        fetch(fetchUrl, { credentials: 'include' })
-            .then(decodeRes)
+        fetch(fetchUrl, { credentials: 'include', signal: controller.signal })
+            .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return decodeRes(r); })
             .then(txt => {
+                if (!isCurrent()) return;
                 autoPageLoading = false;
-                if (location.href !== hrefAtStart) return;   // 抓取期间已翻页，丢弃
                 appendPage(new DOMParser().parseFromString(txt, 'text/html'), fetchUrl, opMode);
                 renderApp();
                 setTimeout(maybeAutoLoad, 250);   // 追加后仍贴近底部（短页）时链式补齐，限速降低限流概率
             })
             .catch(() => {
+                if (!isCurrent()) return;
                 autoPageLoading = false;
                 autoPageError = true;
                 renderApp();
-            });
+            }).finally(() => { clearTimeout(timeout); if (pageRequest === controller) pageRequest = null; });
     };
 
     const maybeAutoLoad = () => {
-        if (!store.autopage || autoPageLoading || autoPageError) return;
+        if (!store.on || covered || document.hidden || !store.autopage || autoPageLoading || autoPageError) return;
         if (nearBottom()) loadNextPage();   // 是否有下一页（含 opEnd）由 loadNextPage 自判
     };
     const onBodyScroll = () => maybeAutoLoad();
@@ -975,11 +1093,13 @@
         line(esc('autopage              滚到底自动加载下一页（无限滚动）'), 'cad-dim'),
         line(esc('ls                    列出当前内容 · open <n> 打开第 n 帖'), 'cad-dim'),
         line('<b>显示 / 开关</b>', 'cad-sect'),
+        line(esc('Esc / pause 临时遮屏并保留阅读位置 · compact 精简终端提示'), 'cad-dim'),
         line(esc('theme · claude/codex · dark/light   主题切换'), 'cad-dim'),
         line(esc('img · op · expand · vim · autopage  图片/只看楼主/展开截断/vim/无限滚动'), 'cad-dim'),
         line('<b>vim 键位</b>', 'cad-sect'),
         line(esc('j/k 滚动 · h/l 上/下页 · gg/G 顶/底 · 数字前缀如 5j · 数字+Enter 开帖'), 'cad-dim'),
         line(esc('/ 搜索 · : 命令 · i 聚焦输入框 · o 预填 open/search · ctrl+o 展开截断'), 'cad-dim'),
+        line(esc('Ctrl+[                退出输入框，恢复 vim 快捷键'), 'cad-dim'),
         line(esc('Tab                   命令补全（多候选时列出） · ↑↓ 历史'), 'cad-dim'),
         line('<b>其他</b>', 'cad-sect'),
         line(esc('clear 清屏 · exit 退出伪装（` 同效） · version 版本信息'), 'cad-dim'),
@@ -1144,9 +1264,9 @@
             return;
         }
         else if (m === 'version' || m === 'about')
-            out = [line('NGA Code Agent 伪装 <b>v2.2.3</b> · 渲染层 Preact 重构 · ` 切换伪装', 'cad-faint')];
+            out = [line('NGA Code Agent 伪装 <b>v2.3.1</b> · 精简终端与临时遮屏 · ` 切换伪装', 'cad-faint')];
         else if (m === 'pwd') out = [line(esc(cwdFor(lastData || { kind: 'idle' })), 'cad-faint')];
-        else if (m === 'whoami') out = [line('ivan — 正在认真调试 code agent（并没有摸鱼）', 'cad-faint')];
+        else if (m === 'whoami') out = [line('developer', 'cad-faint')];
         else if (m.startsWith('sudo')) out = [line(esc('sudo: permission denied — 老板在看着'), 'cad-faint')];
         else if (m === 'ls' || m === 'topics') out = lsOut();
         else if (/^open\s+\d+$/.test(m)) {
@@ -1218,12 +1338,23 @@
             syncChrome();
             out = [line('mode → light', 'cad-faint')];
         }
+        else if (m === 'compact') {
+            store.compact = !store.compact;
+            out = [line('compact → ' + (store.compact ? 'on' : 'off'), 'cad-faint')];
+        }
+        else if (m === 'pause') { toggleCover(); return; }
         else if (m === 'img' || m === 'images') {
             store.img = !store.img;
             out = [line(`images → ${store.img ? 'on（显示图片）' : 'off（[image] 占位）'}`, 'cad-faint')];
         }
         else if (m === 'op' || m === 'op only') {
+            cancelPageRequest();
+            autoPageError = false;
             store.opOnly = !store.opOnly;
+            // 普通分页与 authorid 分页的页码不是同一序列；重新从源页构建，不能混用追加尾部。
+            lastData = null;
+            nextPageUrl = null;
+            loadedPages = new Set([location.href]);
             opNextNo = null;   // 切模式后 op 页链重新初始化
             opEnd = false;
             out = [line(`op only → ${store.opOnly ? 'on（只看楼主 · 自动连载整页楼主楼）' : 'off'}`, 'cad-faint')];
@@ -1238,6 +1369,7 @@
         }
         else if (m === 'autopage' || m === 'auto page') {
             store.autopage = !store.autopage;
+            if (!store.autopage) cancelPageRequest();
             if (store.autopage) maybeAutoLoad();
             out = [line(`autopage → ${store.autopage ? 'on（滚到底自动加载下一页）' : 'off'}`, 'cad-faint')];
         }
@@ -1273,7 +1405,7 @@
     /* html.cad-on 控制原页隐藏；root class 控制主题变量 */
     const applyAttrs = () => {
         document.documentElement.classList.toggle('cad-on', store.on);
-        if (root) root.className = `cad-${store.style} cad-${store.mode}`;
+        if (root) root.className = `cad-${store.style} cad-${store.mode}${covered ? ' cad-covered' : ''}`;
     };
 
     /* 廉价签名：href + 容器 id + 结构计数（不含文本长度 —— 广告/赞数等文本级变动不再触发重渲染） */
@@ -1352,6 +1484,8 @@
     };
 
     const toggleDisguise = () => {
+        cancelPageRequest();
+        covered = false;
         store.on = !store.on;
         if (store.on) {
             build();
@@ -1367,14 +1501,23 @@
     /* ================= 全局键位 ================= */
     let pendingCount = '';
     document.addEventListener('keydown', e => {
+        if (e.isComposing || e.keyCode === 229) return;
+        if (store.on && covered) {
+            if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); toggleCover(); }
+            else if (e.key === '`' || e.code === 'Backquote') { e.preventDefault(); e.stopImmediatePropagation(); }
+            return;
+        }
         // 输入栏内部事件由 onInputKey 处理（且已 stopPropagation）
         if (e.target && e.target.classList && e.target.classList.contains('cad-real')) return;
+        if (e.target && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) return;
         if (e.key === '`' || e.code === 'Backquote') {
             e.preventDefault();
             toggleDisguise();
             return;
         }
         if (!store.on) return;
+        if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); toggleCover(); return; }
+        if (e.target?.closest('button, a, [role="button"]')) return;
         if (e.ctrlKey && (e.key === 'o' || e.key === 'O')) {
             e.preventDefault();
             store.expand = !store.expand;
@@ -1383,6 +1526,7 @@
         }
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         if (!store.vim) {
+            if (['?', 't', 'i'].includes(e.key)) { e.preventDefault(); e.stopImmediatePropagation(); }
             if (e.key === '?') runCmd('help');
             else if (e.key === 't') cycleTheme();
             else if (e.key === 'i') focusInput();
@@ -1390,6 +1534,8 @@
         }
         // ---- vim 模式 ----
         const k = e.key;
+        if (/^\d$/.test(k) || ['j', 'k', 'h', 'l', 'g', 'G', '/', ':', 'i', 'o', 't', '?'].includes(k)
+            || (k === 'Enter' && pendingCount)) { e.preventDefault(); e.stopImmediatePropagation(); }
         if (/^\d$/.test(k)) {
             pendingCount += k;
             renderApp();   // showcmd：状态栏实时显示数字前缀
@@ -1456,18 +1602,48 @@
         }).observe(t, { childList: true, characterData: true, subtree: true });
     };
 
-    setInterval(() => { if (store.on) refresh(false); }, 1200);
+    // 只监听源页面，跳过自身 diff；纯文本更新也能刷新，不再每 1.2 秒扫描全页。
+    let sourceDirty = false, sourceTimer = null;
+    const scheduleRefresh = () => {
+        sourceDirty = true;
+        if (sourceTimer || !store.on || covered || document.hidden) return;
+        sourceTimer = setTimeout(() => {
+            sourceTimer = null;
+            if (!store.on || covered || document.hidden) return;
+            sourceDirty = false;
+            refresh(true);
+        }, 180);
+    };
+    const watchSource = () => {
+        new MutationObserver(records => {
+            // NGA 的整块替换可能移除 overlay；复用同一 root，保留输入草稿和遮屏状态。
+            if (root && !root.isConnected && document.body) document.body.appendChild(root);
+            if (records.some(r => {
+                const el = r.target.nodeType === 1 ? r.target : r.target.parentElement;
+                return el && !root?.contains(el) && (el.closest('#m_posts, #m_threads, #m_nav, #m_pbtnbtm, #m_pbtntop, #pagebbtm, #pagebbtop')
+                    || [...r.addedNodes, ...r.removedNodes].some(n => n.nodeType === 1 && (n.matches('#m_posts, #m_threads') || n.querySelector('#m_posts, #m_threads'))));
+            })) scheduleRefresh();
+        }).observe(document.documentElement, { childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['src', 'data-src', 'data-lazy-src', 'data-original', 'href'] });
+    };
+    // history.pushState 没有标准事件；这里只比较 URL，不扫描 DOM。
+    setInterval(() => { if (store.on && !covered && !document.hidden && (sourceDirty || location.href !== dataHref)) scheduleRefresh(); }, 1000);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) cancelPageRequest();
+        else { if (sourceDirty || location.href !== dataHref) scheduleRefresh(); maybeAutoLoad(); }
+    });
     /* 状态栏时钟：每 30s 轻量重渲染（Preact diff 成本极低） */
-    setInterval(() => { if (store.on && root) renderApp(); }, 30000);
+    setInterval(() => { if (store.on && root && !covered && !document.hidden) renderApp(); }, 30000);
 
     const boot = () => {
         realTitle = document.title || realTitle;
         watchTitle();
         stripTrackerErrors();
+        watchSource();
         if (store.on) {
             build();
             setFavicon(true);
         } else applyAttrs();
+        clearTimeout(startupGuard);
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
