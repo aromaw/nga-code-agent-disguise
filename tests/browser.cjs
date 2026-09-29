@@ -33,13 +33,14 @@ async function pageFor(body, values = {}, url = 'https://bbs.nga.cn/read.php?tid
   });
   await page.addInitScript(values => {
     const settings = { cad_autopage: false, ...values };
+    if (values.testAMD) { window.define = () => {}; window.define.amd = {}; }
     window.GM_getValue = (k, d) => k in settings ? settings[k] : d;
     window.GM_setValue = (k, v) => { settings[k] = v; };
-    window.GM_addStyle = css => { const el = document.createElement('style'); el.textContent = css; document.documentElement.appendChild(el); };
+    window.GM_addStyle = css => { const el = document.createElement('style'); el.textContent = css; if (document.documentElement) document.documentElement.appendChild(el); else document.addEventListener('DOMContentLoaded', () => document.head.appendChild(el), { once: true }); };
   }, values);
   // Real document-start execution, before the fixture has been parsed.
   await page.addInitScript(code => {
-    if (document.documentElement) (0, eval)(code);
+    if (GM_getValue('testEarlyStart', false) || document.documentElement) (0, eval)(code);
     else new MutationObserver((_, observer) => {
       if (document.documentElement) { observer.disconnect(); (0, eval)(code); }
     }).observe(document, { childList: true });
@@ -180,5 +181,71 @@ test('topic list aligns long titles and retains links in compact and detailed mo
   }
   await command(page, 'compact');
   assert.match(await page.locator('.cad-body').innerText(), /列出板块/);
+  await close(page);
+});
+
+test('focus shortcuts do not type themselves into the command input', async () => {
+  const page = await pageFor(post(0, 'content'));
+  await page.keyboard.press('i');
+  assert.equal(await page.locator('.cad-real').inputValue(), '');
+  await page.locator('.cad-real').evaluate(el => el.blur());
+  await page.keyboard.press('o');
+  assert.equal(await page.locator('.cad-real').inputValue(), 'search: ');
+  await close(page);
+});
+test('native page replacement keeps the disguise mounted and updates content', async () => {
+  const page = await pageFor(post(0, 'before'));
+  await page.evaluate(body => { document.body.innerHTML = body; }, `<div id="m_posts">${post(0, 'AFTER_REPLACEMENT')}</div>`);
+  await page.waitForFunction(() => document.querySelector('#cad__root .cad-text')?.textContent.includes('AFTER_REPLACEMENT'), null, { timeout: 3000 });
+  await close(page);
+});
+test('page AMD loader does not intercept vendored dependencies', async () => {
+  const page = await pageFor(post(0, 'content'), { testAMD: true });
+  assert.equal(await page.locator('.cad-text').innerText(), 'content');
+  await close(page);
+});
+test('document-start works before the html element exists', async () => {
+  const page = await pageFor(post(0, 'content'), { testEarlyStart: true });
+  assert.equal(await page.locator('.cad-text').innerText(), 'content');
+  await close(page);
+});
+test('Esc can leave the command input and resume vim navigation', async () => {
+  const page = await pageFor(Array.from({length:30},(_,i)=>post(i,'content')).join(''));
+  await page.locator('.cad-real').focus();
+  await page.locator('.cad-real').press('Escape');
+  await page.keyboard.press('Escape');
+  // Explicit Ctrl+[ provides a way to return to normal mode without clicking.
+  await page.locator('.cad-real').press('Control+[');
+  await page.keyboard.press('j');
+  assert.equal(await page.locator('.cad-real').inputValue(), '');
+  assert.ok(await page.locator('.cad-body').evaluate(el => el.scrollTop) > 0);
+  await close(page);
+});
+
+test('OP pagination continues when its first page overlaps the current page', async () => {
+  const page = await pageFor(post(0, 'original'));
+  await page.route('**/read.php?*authorid=*', route => {
+    const no = Number(new URL(route.request().url()).searchParams.get('page'));
+    const body = no === 1 ? post(0, 'original') : no === 2 ? post(10, 'LATER_OP_REPLY') : '';
+    return route.fulfill({ contentType: 'text/html; charset=utf-8', body: fixture(body) });
+  });
+  await command(page, 'op'); await command(page, 'autopage');
+  await page.waitForFunction(() => document.querySelector('.cad-body').textContent.includes('LATER_OP_REPLY'), null, { timeout: 3000 });
+  await close(page);
+});
+test('switching from OP pagination to all replies does not treat the regular second page as the end', async () => {
+  const page = await pageFor(post(0, 'original'));
+  await page.route('**/read.php?*', route => {
+    const url = new URL(route.request().url());
+    const no = Number(url.searchParams.get('page'));
+    let body;
+    if (url.searchParams.has('authorid')) body = no === 1 ? post(0, 'original') + post(10, 'OP_ONLY_REPLY') : '';
+    else body = no === 2 ? post(10, 'OP_ONLY_REPLY') : no === 3 ? post(30, 'LATER_OTHER_REPLY', '303') : '';
+    return route.fulfill({ contentType: 'text/html; charset=utf-8', body: fixture(body).replace(/<div id="m_pbtnbtm">.*?<\/div>/, '') });
+  });
+  await command(page, 'op'); await command(page, 'autopage');
+  await page.waitForFunction(() => document.querySelector('.cad-body').textContent.includes('OP_ONLY_REPLY'));
+  await command(page, 'op');
+  await page.waitForFunction(() => document.querySelector('.cad-body').textContent.includes('LATER_OTHER_REPLY'), null, { timeout: 3000 });
   await close(page);
 });
