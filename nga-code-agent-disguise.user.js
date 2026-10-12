@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NGA Code Agent 伪装（Claude Code / Codex）
 // @namespace    https://github.com/zhaoyifan
-// @version      2.2.3
+// @version      2.2.4
 // @description  将 NGA 页面伪装成 Claude Code / Codex CLI 终端会话，旁人看来你在用 code agent。` 一键切换，? 帮助，输入栏可敲命令（search: 搜索 · board 切版 · help 查看全部），vim 键位。渲染层 Preact 重构
 // @author       zhaoyifan
 // @match        *://bbs.nga.cn/*
@@ -232,11 +232,18 @@
     const stripMetaRefresh = () => {
         const kill = () => document.querySelectorAll('meta[http-equiv="refresh" i]').forEach(m => m.remove());
         kill();
-        if (document.readyState === 'loading') {
-            new MutationObserver((_, obs) => {
-                kill();
-                if (document.head) obs.disconnect();
-            }).observe(document.documentElement, { childList: true, subtree: true });
+        if (document.readyState !== 'loading') return;
+        const start = target => new MutationObserver((_, obs) => {
+            kill();
+            if (document.head) obs.disconnect();
+        }).observe(target, { childList: true, subtree: true });
+        if (document.documentElement) start(document.documentElement);
+        else {
+            // document-start 过早注入时 documentElement 尚未创建，先等它出现
+            const bootObs = new MutationObserver(() => {
+                if (document.documentElement) { bootObs.disconnect(); start(document.documentElement); }
+            });
+            bootObs.observe(document, { childList: true });
         }
     };
     stripMetaRefresh();
@@ -320,6 +327,18 @@
         return lines.join('\n').replace(/\n{3,}/g, '\n\n');
     };
 
+    /* innerText 依赖渲染布局：伪装态下原页被 display:none，抓取的下一页又是离线文档，
+       两种情况下 Chrome 都会退化为 textContent，<br> 换行全部丢失。
+       手动把 <br> 和块级元素转成 \n 再取 textContent，保证两种来源行为一致 */
+    const BLOCK_RE = /^(P|DIV|LI|TR|TABLE|BLOCKQUOTE|H[1-6]|UL|OL|PRE|SECTION|ARTICLE)$/;
+    const innerTextOf = node => {
+        node.querySelectorAll('br').forEach(br => br.replaceWith(document.createTextNode('\n')));
+        node.querySelectorAll('*').forEach(el => {
+            if (BLOCK_RE.test(el.tagName)) el.appendChild(document.createTextNode('\n'));
+        });
+        return node.textContent;
+    };
+
     /* 正文抽取：返回 { text, imgs }。
        显示图片时，正文图替换为占位 token %%IMGN%%（N = imgs 下标），
        渲染阶段按 token 把图片插回原始位置，不再全部堆到文字后面。 */
@@ -347,7 +366,7 @@
         });
         // 点赞数、操作按钮等噪声
         clone.querySelectorAll('script,style,button,.recommendvalue,.ogoodbtn,.postBtnPos,.postinfo,.single_ttip2,.postbtnsc,.right_').forEach(i => i.remove());
-        return { text: cleanText(clone.innerText), imgs };
+        return { text: cleanText(innerTextOf(clone)), imgs };
     };
 
     /* 记录真实标题，避免被伪装标题污染 */
@@ -431,7 +450,7 @@
                     const alt = im.getAttribute('alt');
                     isEmote(im) ? im.replaceWith(alt ? `[${alt}]` : '') : im.remove();
                 });
-                return { depth, text: cleanText(c.innerText) };
+                return { depth, text: cleanText(innerTextOf(c)) };
             }).filter(q => q.text)
             : [];
         const head = [
@@ -731,7 +750,7 @@
             if (el.value) tabComplete(el.value);
         } else if (e.key === 'Escape') {
             el.blur();
-        } else if (e.key === 'Backquote') {
+        } else if (e.key === '`' || e.code === 'Backquote') {
             e.preventDefault();
             toggleDisguise();
         } else if (e.key === 'ArrowUp') {
@@ -1144,7 +1163,7 @@
             return;
         }
         else if (m === 'version' || m === 'about')
-            out = [line('NGA Code Agent 伪装 <b>v2.2.3</b> · 渲染层 Preact 重构 · ` 切换伪装', 'cad-faint')];
+            out = [line('NGA Code Agent 伪装 <b>v2.2.4</b> · 渲染层 Preact 重构 · ` 切换伪装', 'cad-faint')];
         else if (m === 'pwd') out = [line(esc(cwdFor(lastData || { kind: 'idle' })), 'cad-faint')];
         else if (m === 'whoami') out = [line('ivan — 正在认真调试 code agent（并没有摸鱼）', 'cad-faint')];
         else if (m.startsWith('sudo')) out = [line(esc('sudo: permission denied — 老板在看着'), 'cad-faint')];
