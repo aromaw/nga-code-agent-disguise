@@ -21,6 +21,8 @@ function load(html, url, values = {}) {
         (window.document.head || window.document.documentElement).appendChild(style);
     };
     window.__CAD_TEST = true;
+    if (typeof window.TextDecoder !== 'function') window.TextDecoder = TextDecoder;
+    if (typeof window.TextEncoder !== 'function') window.TextEncoder = TextEncoder;
     window.fetch = async (input) => {
         const href = String(input && input.url ? input.url : input);
         if (href.includes('nuke.php')) {
@@ -170,7 +172,9 @@ test('does not swallow keys in fields or during IME composition', async () => {
 
     const live = load(emptyHtml, 'https://bbs.nga.cn/', { cad_on: true });
     live.cad.boot();
+    await new Promise(resolve => setTimeout(resolve, 0));
     const input = live.document.querySelector('.cad-real');
+    assert.equal(live.document.activeElement, input);
     const duringIme = fakeKey({ key: 'Process', code: 'Backquote', keyCode: 229, currentTarget: input });
     live.cad.onInputKey(duringIme);
     assert.equal(duringIme.defaultPrevented, false);
@@ -184,8 +188,9 @@ test('does not swallow keys in fields or during IME composition', async () => {
     await new Promise(resolve => setTimeout(resolve, 150));
 
     const toggle = keydown(live.window, 'keydown', { key: '`', code: 'Backquote' }, input);
-    assert.equal(toggle.defaultPrevented, true);
-    assert.equal(live.cad.store.on, false);
+    assert.equal(toggle.defaultPrevented, false);
+    assert.equal(live.cad.store.on, true);
+    assert.equal(live.document.activeElement, input);
 });
 
 test('vim h scrolls and does not change pages', () => {
@@ -310,7 +315,15 @@ test('reading: links, per-post expand, image toggle, help panel and real status'
     const panel = document.querySelector('.cad-panel');
     assert.ok(panel);
     assert.match(panel.textContent, /quote <floor>/);
-    assert.equal(document.querySelector('#cad__body').textContent.includes('quote <floor>'), false);
+    assert.match(panel.textContent, /bookmark/);
+    assert.match(panel.textContent, /sort reply/);
+    assert.match(panel.textContent, /vote <floor>/);
+    assert.equal(document.querySelector('#cad-floor-1').textContent.includes('quote <floor>'), false);
+    document.querySelector('[data-hint="reply"]').click();
+    assert.match(document.querySelector('.cad-real').value, /^\/reply /);
+    const collapsed = document.querySelector('#cad-floor-2');
+    collapsed.click();
+    assert.match(document.querySelector('#cad__body').textContent, /line-15-hidden/);
 });
 
 test('the shell scrolls inside a column and the cover hides that column', async () => {
@@ -321,7 +334,8 @@ test('the shell scrolls inside a column and the cover hides that column', async 
     const input = document.querySelector('.cad-inputbar');
     const status = document.querySelector('.cad-statusbar');
     assert.equal(window.getComputedStyle(app).display, 'flex');
-    assert.equal(window.getComputedStyle(app).flexDirection, 'column');
+    assert.equal(window.getComputedStyle(app).flexDirection, 'row');
+    assert.equal(window.getComputedStyle(document.querySelector('.cad-main')).flexDirection, 'column');
     assert.notEqual(window.getComputedStyle(body).display, 'none');
     assert.match(body.textContent, /alpha/);
     await cad.runCmd('pause');
@@ -332,7 +346,8 @@ test('the shell scrolls inside a column and the cover hides that column', async 
     const cover = document.querySelector('.cad-cover');
     assert.ok(cover);
     assert.notEqual(window.getComputedStyle(cover).display, 'none');
-    assert.match(cover.textContent, /Static example/);
+    assert.match(cover.textContent, /handleRequest/);
+    assert.equal(cover.textContent.includes('Static example'), false);
     assert.match(body.textContent, /alpha/);
 });
 
@@ -371,4 +386,123 @@ test('a timed-out next page leaves a retry instead of a permanent spinner', asyn
     [...document.querySelectorAll('button')].find(button => /Could not load the next page/.test(button.textContent)).click();
     await new Promise(resolve => realSetTimeout(resolve, 30));
     assert.equal(fetches, 2);
+});
+
+test('clicking a collapsed post expands it, and hint chips are discoverable', () => {
+    const { cad, document } = load(threadHtml, 'https://bbs.nga.cn/read.php?tid=9&page=2', { cad_on: true });
+    cad.boot();
+    const post = document.querySelector('#cad-floor-2');
+    assert.equal(post.textContent.includes('line-15-hidden'), false);
+    post.click();
+    assert.match(document.querySelector('#cad-floor-2').textContent, /line-15-hidden/);
+    document.querySelector('[data-hint="help"]').click();
+    assert.match(document.querySelector('.cad-panel').textContent, /bookmark list/);
+});
+
+test('live NGA markup: pid, quote header, leading indent, collapse, and filters', async () => {
+    const live = load(fs.readFileSync(path.join(__dirname, 'fixtures', 'live-thread.html'), 'utf8'), 'https://bbs.nga.cn/read.php?tid=9&authorid=202');
+    const data = live.cad.extract();
+    assert.equal(data.posts[0].pid, '900');
+    assert.equal(data.posts[0].floor, 0);
+    assert.equal(data.posts[0].text.startsWith('alpha'), true);
+    assert.equal(data.posts[1].pid, '901');
+    assert.equal(data.posts[1].likes, '-3');
+    assert.equal(data.posts[1].isOP, false);
+    const quote = data.posts[1].quotes[0];
+    assert.equal(quote.text.includes('+R'), false);
+    assert.equal(quote.text.includes('undefined'), false);
+    assert.match(quote.text, /quoted line/);
+    assert.equal(quote.author, 'Carol');
+    assert.equal(quote.time, '');
+    assert.equal(data.title.includes('中的回复'), false);
+    const long = 'word '.repeat(400);
+    const box = new live.window.DOMParser().parseFromString('<div class="postcontent">' + long + '</div>', 'text/html');
+    live.cad.boot();
+    assert.match(live.document.querySelector('.cad-expand').textContent, /expand/);
+    assert.equal(live.document.querySelector('#cad-floor-2').textContent.includes('line-19'), false);
+    live.cad.store.opOnly = true;
+    await live.cad.runCmd('author off');
+    assert.equal(live.cad.store.opOnly, false);
+    await live.cad.runCmd('boards');
+    assert.match(live.document.querySelector('.cad-panel').textContent, /board/);
+    await live.cad.runCmd('bookmark');
+    await live.cad.runCmd('n');
+    assert.match(live.document.querySelector('.cad-panel').textContent, /Bookmark cancelled/);
+    assert.ok(box);
+});
+
+test('sort, floor, author, vote, bookmark, and new thread stay behind an explicit confirm', async () => {
+    const list = load(listHtml, 'https://bbs.nga.cn/thread.php?fid=485');
+    assert.match(list.cad.sortTarget('post'), /order_by=postdatedesc/);
+    assert.match(list.cad.sortTarget('reply'), /order_by=lastpostdesc/);
+    assert.match(list.cad.sortTarget('reply'), /fid=485/);
+
+    const { cad, document, window } = load(threadHtml, 'https://bbs.nga.cn/read.php?tid=9&page=2', { cad_on: true });
+    const posts = cad.extract().posts;
+    assert.equal(cad.authorTarget('Alice', posts, '9').uid, '101');
+    assert.match(cad.authorTarget('Alice', posts, '9').href, /authorid=101/);
+    assert.equal(cad.floorTarget(41, [], '9').page, 3);
+    assert.match(cad.floorTarget(1, posts, '9').href, /pid=555/);
+    const vote = cad.buildVotePayload(posts[0], '9', '-7');
+    assert.equal(vote.fields.find(field => field.name === 'pid').value, '555');
+    assert.equal(vote.fields.find(field => field.name === '__act').value, 'recommend');
+    const nav = document.createElement('a');
+    nav.setAttribute('href', '/thread.php?favor=1');
+    nav.textContent = 'favorites';
+    document.body.appendChild(nav);
+    const ignored = cad.buildBookmarkPayload({ tid: '9', fid: '-7', title: 'Test thread', remove: false });
+    assert.equal(ignored.action, '/nuke.php?__output=11');
+    assert.equal(ignored.fields.find(field => field.name === '__act').value, 'add');
+    const action = document.createElement('a');
+    action.setAttribute('href', '/nuke.php?__lib=topic_favor&__act=add&tid=9');
+    document.body.appendChild(action);
+    const mark = cad.buildBookmarkPayload({ tid: '9', fid: '-7', title: 'Test thread', remove: false });
+    assert.match(mark.action, /topic_favor/);
+    assert.equal(mark.fields.find(field => field.name === '__act').value, 'add');
+
+    const scored = new window.DOMParser().parseFromString(
+        '<div class="forumbox postbox"><div class="posterinfo"><a class="author" href="nuke.php?uid=1">A</a></div><div class="postinfo">#3 2026-01-01</div><div class="postcontent">hi</div><span class="recommendvalue">-3</span></div>',
+        'text/html'
+    );
+    const negative = cad.extractPosts(scored).posts[0];
+    assert.equal(negative.likes, '-3');
+    assert.match(negative.head, /-3/);
+    assert.equal(negative.head.includes('+3'), false);
+
+    const calls = [];
+    window.__cadMockSubmit = async (payload) => {
+        calls.push(payload);
+        return { ok: true, message: 'ok' };
+    };
+    cad.boot();
+    await cad.runCmd('vote 1');
+    assert.equal(calls.length, 0);
+    assert.match(document.querySelector('.cad-panel').textContent, /Submit this vote/);
+    await cad.runCmd('n');
+    assert.equal(calls.length, 0);
+    await cad.runCmd('vote 1');
+    await cad.runCmd('y');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].fields.find(field => field.name === 'pid').value, '555');
+
+    await cad.runCmd('bookmark');
+    assert.equal(calls.length, 1);
+    await cad.runCmd('y');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].fields.find(field => field.name === 'tid').value, '9');
+
+    await cad.runCmd('user Alice');
+    assert.match(document.querySelector('.cad-panel').textContent, /uid 101/);
+
+    const form = new window.DOMParser().parseFromString(
+        '<form action="/post.php?action=new" method="post"><input name="action" value="new"><input name="fid" value="-7"><input name="post_subject" value=""><textarea name="post_content"></textarea><input name="token" value="abc123"></form>',
+        'text/html'
+    ).querySelector('form');
+    const thread = cad.buildThreadPayload(form, { subject: 'New topic', text: 'hello thread', fid: '-7' });
+    const fields = Object.fromEntries(thread.fields.map(field => [field.name, field.value]));
+    assert.equal(fields.action, 'new');
+    assert.equal(fields.post_subject, 'New topic');
+    assert.equal(fields.post_content, 'hello thread');
+    assert.equal(fields.token, 'abc123');
+    assert.equal(fields.fid, '-7');
 });

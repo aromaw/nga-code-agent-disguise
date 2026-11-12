@@ -2,9 +2,11 @@
   "name": "nga-code-agent-disguise",
   "private": true,
   "scripts": {
-    "test": "node --test tests/disguise.test.js"
+    "test": "node --test tests/disguise.test.js tests/fixes.test.js tests/dumps.test.js",
+    "shots": "node tests/shots.js"
   },
   "devDependencies": {
-    "jsdom": "^26.1.0"
+    "jsdom": "^26.1.0",
+    "playwright-core": "^1.50.0"
   }
 }
