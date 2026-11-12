@@ -21,6 +21,14 @@ Tampermonkey 脚本。把 NGA（`bbs.nga.cn`、`ngabbs.com`、`bbs.ngacn.cc`、`
 
 回复、新帖、收藏和投票都要按 Send 或 `y` 才会发出。Cancel 和 `n` 会按动作本身来写取消文案。
 
+## 用户名与请求
+
+所有响应都按 GBK 解码。已经是干净 UTF-8 的正文会保留；两种解码都干净时，采用 UTF-8。收藏缓存里如果有乱码（U+FFFD，或把 GBK 的「录」读成 `¼`），会丢掉并重新拉取。
+
+显示名先从页面取，顺序是：`commonui.userInfo.setAll`（含十六进制 `uuname`）、引用里的 `userlink`、版块或收藏页上的作者链接。取到的名字会缓存。只有页面上没有名字时才请求 ucp；同一次会话里第一次 HTTP 503 之后不再请求。`debug names` 不在斜杠菜单里，它会列出已解析的数量，以及每个名字的来源：`page-userinfo`、`page-dom`、`cache` 或 `ucp`。
+
+这个账号上，NGA 自己会对未署名的作者显示 `UID:`。脚本保留这个标签，不会打开个人资料页，也不会再打别的接口去补名字。
+
 ## 按键
 
 反引号 `` ` `` 切换伪装。文本框里、输入法组字时、以及确认候选词的那一下，都不会触发。`togglekey f2` 可以换成别的键。`togglekey reset` 恢复反引号。
@@ -28,7 +36,7 @@ Tampermonkey 脚本。把 NGA（`bbs.nga.cn`、`ngabbs.com`、`bbs.ngacn.cc`、`
 | 按键 | 作用 |
 | --- | --- |
 | `` ` `` | 在文本框之外切换伪装 |
-| `Esc` | 先关掉帮助或草稿，否则显示静态遮屏。再按 `Esc` 或 Resume 回来 |
+| `Esc` | 先关掉帮助或草稿，否则用整屏代码审阅界面盖住窗口。再按 `Esc` 回来 |
 | `Ctrl+[` | 离开命令行 |
 | `Tab` | 补全 |
 | 上 / 下 | 命令历史 |
@@ -77,8 +85,8 @@ clear · exit · version · pwd
 
 ```sh
 npm install
-npm test          # jsdom：disguise.test.js、fixes.test.js、dumps.test.js（没有 /workspace/nga-dom 时跳过 dumps）
+npm test          # jsdom：disguise.test.js、fixes.test.js、dumps.test.js
 npm run shots     # 用 Playwright 对 dumps 截图，写到 /workspace/nga-dev-shots
 ```
 
-`npm test` 使用 jsdom 和 `tests/fixtures/`，不访问 NGA。4.1.3 优先从页面（`userInfo.setAll` / `uuname`、作者和引用链接）取用户名，ucp 只作后备并在首次 HTTP 503 后停止；收藏标题会丢弃乱码缓存并以正确编码解码。`debug names` 会标明每个名字的来源。详见 [CHANGELOG.md](CHANGELOG.md)。收藏、投票、发新帖和通知没有在正式站上验证过。
+`npm test` 使用 jsdom 和 `tests/fixtures/`，不访问 NGA。没有 `/workspace/nga-dom` 时 `tests/dumps.test.js` 会跳过。4.1.3 的行为见 [CHANGELOG.md](CHANGELOG.md)：GBK 解码、收藏缓存、优先从页面取用户名、`debug names`、Esc 遮屏、斜杠菜单、引用、楼层、pid、图片和只看楼主，已在 `bbs.nga.cn` 上核对过。会改数据的操作仍然要等 `y`，并使用页面上已有的表单。

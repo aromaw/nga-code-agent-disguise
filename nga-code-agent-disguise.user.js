@@ -48,21 +48,6 @@
     };
 
     const FAKE_DIR = '~/projects/api-server';
-    const COVER_TEXT = [
-        'src/server.ts',
-        'You',
-        'Review the error path in handleRequest before we ship.',
-        '',
-        'Claude',
-        'I read src/server.ts. The handler returns ok even when the service rejects.',
-        '',
-        '  @@ handleRequest',
-        '  - return response.ok(result);',
-        '  + if (!result.ok) return response.error(result.error);',
-        '  + return response.ok(result);',
-        '',
-        'The change stays inside handleRequest. Waiting on you.',
-    ].join('\n');
     const COVER_DIFF = [
         { kind: 'hunk', text: '@@ src/server.ts @@' },
         { kind: '', oldN: 1, newN: 1, text: "import { service } from './service';" },
@@ -140,13 +125,10 @@
     .cad-crumb { font-size:14px; color:var(--text); font-weight:550; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .cad-modal { margin:8px 0 12px; }
     .cad-modal-card { border:1px solid var(--border); border-radius:12px; padding:12px 14px; background:var(--bg-input); color:var(--text); }
-    #cad__root pre, #cad__root .cad-preview, #cad__root .cad-cover-code { background:transparent !important; color:var(--text) !important; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; }
+    #cad__root pre, #cad__root .cad-preview { background:transparent !important; color:var(--text) !important; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; }
     #cad__root .cad-body { min-height:0; overflow-x:hidden; overscroll-behavior:contain; }
 
     .cad-topbar { flex-shrink:0; min-height:30px; display:flex; align-items:center; gap:6px; padding:0 10px; user-select:none; border-bottom:1px solid var(--border); }
-    .cad-topbar i { width:10px; height:10px; border-radius:50%; display:block; }
-    .cad-topbar i:nth-child(1){background:#ff5f57;} .cad-topbar i:nth-child(2){background:#febc2e;} .cad-topbar i:nth-child(3){background:#28c840;}
-    .cad-windowtitle { margin:auto; color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .cad-action { border:0; background:none; color:var(--dim); cursor:pointer; padding:2px 6px; }
     .cad-action:hover { color:var(--accent2); }
     .cad-topbar .cad-action { font-size:11px; }
@@ -170,12 +152,8 @@
     .cad-trow:hover a.cad-tlink { color:var(--accent2); }
     .cad-trow .cad-meta { grid-column:3; font-size:13px; color:var(--dim); }
     .cad-trep { display:inline-block; min-width:52px; text-align:right; padding-right:10px; color:var(--dim); }
-    .cad-boards { margin:0 -22px 6px; padding:2px 22px; }
-    .cad-boardcur { color:var(--accent2) !important; font-weight:700; }
     .cad-sect { color:var(--accent2) !important; font-weight:600; }
     .cad-line { white-space:pre-wrap; word-break:break-word; }
-    .cad-user { color:var(--text); font-weight:600; background:var(--band); margin:6px -22px 2px; padding:3px 22px; }
-    .cad-user::before { content:'❯ '; color:var(--accent); font-weight:700; }
     .cad-meta { color:var(--dim); font-size:13px; }
     .cad-dim { color:var(--dim); }
     .cad-faint { color:var(--faint); }
@@ -212,21 +190,16 @@
         flex-shrink:0; position:relative; cursor:text;
         border-top:1px solid var(--border); border-bottom:1px solid var(--border);
         background:var(--bg);
-        display:flex; align-items:center; gap:8px; color:var(--text);
+        display:flex; flex-direction:column; align-items:stretch; gap:8px; color:var(--text);
         width:100%; box-sizing:border-box;
         padding:10px max(28px, calc((100% - 110ch) / 2));
     }
-    .cad-inputbar > .cad-faint { max-width:35%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .cad-inputbar .prompt { color:var(--text); font-weight:700; }
     .cad-real {
         flex:1; width:100%; min-height:52px; resize:vertical; background:var(--bg-input); color:var(--text);
         border:1px solid var(--border); border-radius:12px; outline:none; font:inherit; padding:10px 12px; caret-color:var(--text);
     }
     .cad-send { align-self:flex-end; background:var(--accent); color:var(--bg); border:0; border-radius:8px; padding:6px 14px; cursor:pointer; }
-    .cad-inputbar { flex-direction:column; align-items:stretch; }
     .cad-real::placeholder { color:var(--faint); opacity:0.7; }
-    .cad-cursor { width:8px; height:16px; background:var(--text); display:inline-block; flex-shrink:0; animation:cad-blink 1.06s step-end infinite; }
-    @keyframes cad-blink { 50% { opacity:0; } }
     .cad-statusbar {
         flex-shrink:0; min-height:32px; display:flex; align-items:center; gap:8px;
         padding:0 16px; color:var(--dim); font-size:13px; user-select:none; overflow:hidden; white-space:nowrap;
@@ -278,21 +251,17 @@
     .cad-dline.cad-del span:nth-child(3) { color:#ffb4b0; }
     .cad-dline.cad-add { background:rgba(46,160,90,.14); }
     .cad-dline.cad-add span:nth-child(3) { color:#b6f0c6; }
-    .cad-cover-code { color:#c5ccd3 !important; background:transparent !important; line-height:1.7; white-space:pre; margin:0; font-family:inherit; }
     .cad-idlebtn { color:var(--link); }
-    @media (prefers-reduced-motion:reduce) { .cad-cursor { animation:none; } }
     @media (max-width:760px) {
         .cad-welcome .right { display:none; }
         .cad-welcome .left { min-width:0; }
         .cad-body { padding:4px 0 16px; }
         .cad-measure, .cad-hints, .cad-inputbar { padding-left:16px; padding-right:16px; }
-        .cad-user, .cad-cmd { margin-left:-12px; margin-right:-12px; padding-left:12px; padding-right:12px; }
+        .cad-cmd { margin-left:-12px; margin-right:-12px; padding-left:12px; padding-right:12px; }
         .cad-trow { margin:0 -12px; padding:3px 12px; }
-        .cad-boards { margin:0 -12px 6px; padding:2px 12px; }
         .cad-inputbar, .cad-panel { padding-left:12px; padding-right:12px; }
         .cad-statusbar { padding:0 12px; }
         .cad-statusbar .cad-secondary { display:none; }
-        .cad-inputbar > .cad-faint { display:none; }
         .cad-img { max-width:100%; }
         .cad-topbar { padding:0 8px; }
     }
@@ -1290,8 +1259,7 @@
             const again = postPid(b);
             if (again && again !== '0') pid = again;
         }
-        const rawName = text(b.querySelector('.posterinfo .author, .posterInfoLine .author, a.author, [id^="postauthor"]'))
-            || text(b.querySelector('[id^="postauthor"]')) || '';
+        const rawName = text(b.querySelector('.posterinfo .author, .posterInfoLine .author, a.author, [id^="postauthor"]')) || '';
         let name = resolveAuthorName(rawName, uid);
         let authorFiltered = false;
         try { authorFiltered = new URL(location.href).searchParams.has('authorid'); } catch (err) { authorFiltered = false; }
@@ -1501,11 +1469,6 @@
             : [];
         const favIds = new Set(sidebarFavorites().map(t => t.tid));
         return uniqueThreads([recent, current]).filter(t => !favIds.has(t.tid));
-    }
-
-    function sidebarThreads() {
-        // Kept for tests and bookmark list: favorites first, then recent.
-        return uniqueThreads([sidebarFavorites(), sidebarRecent()]);
     }
 
     function applyFavorDoc(doc, url) {
@@ -1737,11 +1700,6 @@
                 if (UCP_GAP) setTimeout(done, UCP_GAP);
                 else done();
             });
-    }
-
-    function fetchLoc(uid) {
-        if (locCache[uid]) return Promise.resolve(locCache[uid]);
-        return fetchUcp(uid).then(r => (r && r.loc) || '');
     }
 
     function applyCachedNames(posts) {
@@ -2689,36 +2647,30 @@
         if (!res.ok) throw new Error('Could not load notifications (HTTP ' + res.status + ').');
         const htmlText = await decodeRes(res);
         const doc = new DOMParser().parseFromString(htmlText, 'text/html');
-        const rows = [];
+        const rows = collectThreadLinks(doc, url);
+        const login = /\u8bf7\u5148\u767b\u5f55|\u5c1a\u672a\u767b\u5f55|\u8bf7\u767b\u5f55|not logged in/i.test(doc.body ? doc.body.textContent : '');
+        return { rows: rows.slice(0, 20), url, login };
+    }
+
+    function collectThreadLinks(doc, baseUrl) {
+        const out = [];
         const seen = new Set();
-        [...doc.querySelectorAll('a[href*="read.php"], a[href*="tid="]')].forEach(a => {
-            const title = text(a);
+        (doc || document).querySelectorAll('a[href*="read.php"], a[href*="tid="]').forEach(a => {
             const href = a.getAttribute('href') || '';
+            const title = text(a);
             if (!title || title.length < 2 || seen.has(href)) return;
             seen.add(href);
             let abs = href;
-            try { abs = new URL(href, url).href; } catch (err) { abs = href; }
-            rows.push({ title, href: abs });
+            try { abs = new URL(href, baseUrl || location.href).href; } catch (err) { abs = href; }
+            out.push({ title, href: abs });
         });
-        const login = /\u8bf7\u5148\u767b\u5f55|\u5c1a\u672a\u767b\u5f55|\u8bf7\u767b\u5f55|not logged in/i.test(doc.body ? doc.body.textContent : '');
-        return { rows: rows.slice(0, 20), url, login };
+        return out;
     }
 
     function favoriteLinks(doc) {
         const data = extractTopics(doc);
         if (data && data.topics && data.topics.filter(t => !t.sep).length) return data.topics.filter(t => !t.sep);
-        const out = [];
-        const seen = new Set();
-        doc.querySelectorAll('a[href*="read.php"], a[href*="tid="]').forEach(a => {
-            const href = a.getAttribute('href') || '';
-            const title = text(a);
-            if (!title || title.length < 2 || seen.has(href)) return;
-            seen.add(href);
-            let abs = href;
-            try { abs = new URL(href, location.href).href; } catch (err) { abs = href; }
-            out.push({ title, href: abs });
-        });
-        return out;
+        return collectThreadLinks(doc, location.href);
     }
 
     async function cmdUser(token) {
@@ -3844,16 +3796,28 @@
         <span class="cad-meta">${t.author}${t.postDate ? ' ' + t.postDate : ''}${t.replyer ? ' · last ' + t.replyer : ''}${t.replyDate ? ' ' + t.replyDate : ''}</span>
     </div>`;
 
-    const BoardsBar = () => {
-        const cur = pageFid();
-        const save = cur
-            ? html`<button type="button" class="cad-action" title="board add" onClick=${() => runCmd('board add')}>[+]</button>`
-            : null;
-        // Element children only. Adjacent text nodes make Preact's diff throw in jsdom
-        // ("The child can not be found in the parent") when the row gains its first board.
-        if (!boards.length) return save;
-        return html`<div class="cad-boards cad-line cad-faint"><span>boards:</span>${boards.map((b, i) => html`<a class=${'cad-pagelink' + (String(b.fid) === String(cur) ? ' cad-boardcur' : '')} href=${'/thread.php?fid=' + encodeURIComponent(b.fid)} title=${'board ' + (i + 1)}>${b.name}</a>`)}${save}</div>`;
-    };
+    function topicNodes(topics) {
+        let n = 0;
+        return (topics || []).map(t => t.sep
+            ? html`<${PageSep} key=${t.sep} label=${t.sep} />`
+            : html`<${TopicRow} key=${t.href} t=${t} i=${n++} />`);
+    }
+
+    function visiblePosts(data) {
+        return store.opOnly ? data.posts.filter(p => p.isOP || p.sep) : data.posts;
+    }
+
+    function postNodes(posts) {
+        return (posts || []).map(p => p.sep
+            ? html`<${PageSep} key=${p.sep} label=${p.sep} />`
+            : html`<${PostBlock} key=${p.id} p=${p} maxLines=${POST_PREVIEW_LINES} />`);
+    }
+
+    function hotBlock(data) {
+        if (store.opOnly || !data.hot || !data.hot.length) return null;
+        return html`<div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'highlights' : 'hot replies'}</span></div>
+            ${data.hot.map(p => html`<${PostBlock} key=${'hot-' + p.id} p=${p} maxLines=${POST_PREVIEW_LINES} />`)}`;
+    }
 
     const CmdLine = ({ cwd, cmd }) => html`<div class="cad-cmd"><span class="cad-ps1">➜ ${cwd}</span> ${cmd}</div>`;
     const Welcome = ({ cwd }) => store.compact
@@ -3887,25 +3851,22 @@
     const ClaudeView = ({ data }) => {
         const cwd = cwdFor(data);
         if (data.kind === 'topics') {
-            let tn = 0;
             return html`<div>
                 <${Welcome} cwd=${cwd} />
                 <${CmdLine} cwd=${cwd} cmd=${contextLine(data)} />
                 <div class="cad-kicker"><span class="cad-sect">${data.board}</span> · ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics</div>
-                ${data.topics.map(t => t.sep ? html`<${PageSep} key=${t.sep} label=${t.sep} />` : html`<${TopicRow} key=${t.href} t=${t} i=${tn++} />`)}
+                ${topicNodes(data.topics)}
                 <${Pager} pager=${data.pager} />
             </div>`;
         }
         if (data.kind === 'posts') {
-            const visible = store.opOnly ? data.posts.filter(p => p.isOP || p.sep) : data.posts;
             return html`<div>
                 <${CmdLine} cwd=${cwd} cmd=${store.compact ? 'cat notes/review.md' : 'open "' + data.title + '"'} />
                 <h1 class="cad-title">${data.title}</h1>
                 <div class="cad-kicker">${contextLine(data)}</div>
-                ${(!store.opOnly && data.hot && data.hot.length) ? html`<div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'highlights' : 'hot replies'}</span></div>
-                    ${data.hot.map(p => html`<${PostBlock} key=${'hot-' + p.id} p=${p} maxLines=${POST_PREVIEW_LINES} />`)}` : null}
+                ${hotBlock(data)}
                 <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'output' : 'replies'}</span></div>
-                ${visible.map(p => p.sep ? html`<${PageSep} key=${p.sep} label=${p.sep} />` : html`<${PostBlock} key=${p.id} p=${p} maxLines=${POST_PREVIEW_LINES} />`)}
+                ${postNodes(visiblePosts(data))}
                 <${Pager} pager=${data.pager} />
                 <div class="cad-kicker">ctrl+o ${store.expand ? 'collapses' : 'expands'} every post. reply, quote, post, and vote wait for y.</div>
             </div>`;
@@ -3916,30 +3877,28 @@
     const CodexView = ({ data }) => {
         const cwd = cwdFor(data);
         if (data.kind === 'topics') {
-            let tn = 0;
             return html`<div>
                 <${CodexBanner} />
                 <div class="cad-blocktag">user</div>
                 <div class="cad-line">${store.compact ? 'Inspect the workspace index' : 'List topics in ' + data.board}</div>
                 <div class="cad-blocktag">codex</div>
                 <div class="cad-line cad-faint">cwd: ${cwd} · ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics</div>
-                ${data.topics.map(t => t.sep ? html`<${PageSep} key=${t.sep} label=${t.sep} />` : html`<${TopicRow} key=${t.href} t=${t} i=${tn++} />`)}
+                ${topicNodes(data.topics)}
                 <${Pager} pager=${data.pager} />
             </div>`;
         }
         if (data.kind === 'posts') {
-            const visible = store.opOnly ? data.posts.filter(p => p.isOP || p.sep) : data.posts;
+            const visible = visiblePosts(data);
             return html`<div>
                 <${CodexBanner} />
                 <div class="cad-blocktag">user</div>
                 <div class="cad-line">${store.compact ? 'Read notes/review.md' : 'Open thread ' + data.title}</div>
                 <div class="cad-blocktag">codex</div>
                 <h1 class="cad-title">${data.title}</h1>
-                <div class="cad-kicker">${(store.opOnly ? data.posts.filter(p => p.isOP || p.sep) : data.posts).reduce((a, p) => a + (p.sep ? 0 : 1), 0)} posts${store.opOnly ? ' · OP only' : ''} · cwd: ${cwd}</div>
-                ${(!store.opOnly && data.hot && data.hot.length) ? html`<div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'highlights' : 'hot replies'}</span></div>
-                    ${data.hot.map(p => html`<${PostBlock} key=${'hot-' + p.id} p=${p} maxLines=${POST_PREVIEW_LINES} />`)}` : null}
+                <div class="cad-kicker">${visible.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} posts${store.opOnly ? ' · OP only' : ''} · cwd: ${cwd}</div>
+                ${hotBlock(data)}
                 <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'output' : 'replies'}</span></div>
-                ${visible.map(p => p.sep ? html`<${PageSep} key=${p.sep} label=${p.sep} />` : html`<${PostBlock} key=${p.id} p=${p} maxLines=${POST_PREVIEW_LINES} />`)}
+                ${postNodes(visible)}
                 <${Pager} pager=${data.pager} />
             </div>`;
         }
@@ -4115,7 +4074,6 @@
                         : html`<div class=${'cad-dline' + (row.kind === 'del' ? ' cad-del' : row.kind === 'add' ? ' cad-add' : '')}>
                             <span>${row.oldN || ''}</span><span>${row.newN || ''}</span><span>${(row.kind === 'del' ? '- ' : row.kind === 'add' ? '+ ' : '  ') + row.text}</span>
                         </div>`)}
-                    <pre class="cad-cover-code" style="position:absolute;left:-9999px;top:auto">${COVER_TEXT}</pre>
                 </div>
                 <div class="cad-cover-foot">src/server.ts · Ln 43, Col 12 · TypeScript · UTF-8 · LF</div>
             </div>
@@ -4265,7 +4223,6 @@
             sidebarFavorites,
             sidebarRecent,
             discoverPageBoards,
-            sidebarThreads,
             isUidLabel,
             getPanel: () => panel,
             getPending: () => pendingReply,

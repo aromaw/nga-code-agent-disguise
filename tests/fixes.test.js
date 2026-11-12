@@ -340,9 +340,9 @@ function gbkBuffer(hex) {
     return Uint8Array.from(hex.match(/../g).map(h => parseInt(h, 16))).buffer;
 }
 
-// window.script_muti_get_var_store={"data":[{"uid":"2202186","username":"西西弗读者","uuname":"","ipLoc":"上海"}]};
+// GBK bytes of a prefixed ucp body. The username field decodes to 西西弗读者 and ipLoc to 上海.
 const UCP_GBK_PREFIXED = '77696e646f772e7363726970745f6d7574695f6765745f7661725f73746f72653d7b2264617461223a5b7b22756964223a2232323032313836222c22757365726e616d65223a22cef7cef7b8a5b6c1d5df222c2275756e616d65223a22222c2269704c6f63223a22c9cfbaa3227d5d7d3b';
-// 关于我在2024年遇到的那些奇人异事
+// GBK bytes of the favorite title 关于我在2024年遇到的那些奇人异事.
 const FAV_TITLE_GBK = 'b9d8d3daced2d4da32303234c4ead3f6b5bdb5c4c4c7d0a9c6e6c8cbd2eccac2';
 
 function nameThread(uid, label) {
