@@ -1,67 +1,95 @@
-# NGA Code Agent 伪装
+[中文说明](README.zh-CN.md)
 
-把 NGA 论坛页面伪装成 Claude Code / Codex CLI 终端会话的 Tampermonkey 脚本 —— 旁人看来你在用 code agent 调试项目，实际上你在刷论坛。
+# NGA Code Agent Disguise
 
-渲染层基于 Preact + htm（已内联，无外部依赖），全量 diff 渲染，滚动 / 焦点 / 图片加载状态在刷新间自动保留。
+A Tampermonkey script that shows NGA forum pages (`bbs.nga.cn`, `ngabbs.com`, `bbs.ngacn.cc`, `nga.178.com`) as a Claude Code / Codex CLI session. The rendering layer is Preact and htm, inlined, with no network dependency of its own.
 
-## 安装
+## Install
 
-1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展
-2. 点击安装：[nga-code-agent-disguise.user.js](https://raw.githubusercontent.com/aromaw/nga-code-agent-disguise/main/nga-code-agent-disguise.user.js)
+1. Install [Tampermonkey](https://www.tampermonkey.net/).
+2. Open [nga-code-agent-disguise.user.js](https://raw.githubusercontent.com/aromaw/nga-code-agent-disguise/main/nga-code-agent-disguise.user.js).
 
-适配站点：`bbs.nga.cn` · `ngabbs.com` · `bbs.ngacn.cc` · `nga.178.com`
+`@updateURL` and `@downloadURL` point at that same file on `main`.
 
-## 基本操作
+## Keys
 
-| 按键 | 作用 |
+The disguise toggle defaults to `` ` ``. It does not run while a text field is focused, while an IME composition is in progress, or for the key-up that confirms a candidate. `togglekey f2` (or `togglekey ctrl+.` and similar) stores a different shortcut. `togglekey reset` restores the backtick.
+
+| Key | Action |
 | --- | --- |
-| `` ` ``（反引号） | 一键切换伪装 / 原始页面 |
-| `?` | 帮助 |
-| `t` | 循环切换主题（claude/codex × dark/light） |
-| `i` | 聚焦底部输入框 |
-| `Tab` | 命令补全（多候选时列出） |
-| `↑` / `↓` | 命令历史 |
+| `` ` `` | Toggle the disguise, outside text fields |
+| `Esc` | Close help or a reply draft. Otherwise show a static cover screen. `Esc` or Resume brings the thread back. |
+| `Ctrl+[` | Leave the command line |
+| `Tab` | Complete a command |
+| Up / Down | Command history |
 
-## 命令（底部输入栏）
+Vim keys are **off** until you run `vim`. With vim off, `t`, `?`, `i`, `j`, `k`, `h`, and `l` do nothing, so reading does not eat keystrokes. With vim on, and focus not in a text field:
+
+| Key | Action |
+| --- | --- |
+| `j` / `k` | Scroll |
+| `h` / `l` | Scroll one screen. They do not change pages. |
+| `gg` / `G` | Top / bottom |
+| digits | `5j` repeats. On a topic list, digits then Enter open that topic. |
+| `/` | Prefill `search: ` |
+| `:` or `i` | Focus the command line |
+| `o` | Prefill `open ` on a list, or `search: ` in a thread |
+| `t` | Cycle the theme |
+| `?` | Help |
+| `Ctrl+o` | Expand or collapse every post |
+
+`next` and `prev` are what change pages. A page change drops posts that infinite scroll had already appended, which is why `h` and `l` no longer do it.
+
+## Commands
+
+A leading `/` is optional. `/help` and `help` are the same command.
 
 ```
-search: <关键词>      本版搜索（在板块页时自动限定 fid）
-search: -g <关键词>   全站搜索
-board list            收藏板块列表（页面顶部 boards: 栏也可直接点击切换）
-board add [名字]      收藏当前板块
-board <n>             跳转到收藏的第 n 个板块
-board del <n>         删除收藏
-board fid <fid>       按 fid 直达板块
-next page / prev page 下一页 / 上一页（帖子与列表通用）
-go page <n>           跳到第 n 页
-open <n>              打开板块页第 n 帖
-ls                    列出当前内容
-autopage              无限滚动：滚到底自动抓取下一页，内容接在下方继续滑动
-img / op / expand     显示图片 / 只看楼主（自动连载整页楼主楼）/ 展开截断
-theme / dark / light  主题切换
-clear                 清空命令回显
-exit                  退出伪装（同 ` 键）
+help
+search: <words>          this board when a fid is known
+search: -g <words>       the whole site
+board list
+board add [name]         fid from the URL, the reply form, or the breadcrumb
+board <n>                open favorite n
+board fid <fid>          open a board, including a negative fid
+board del <n>
+next / prev / go page <n> / top
+ls / open <n>
+reply [text]
+reply <floor> [text]
+quote <floor> [text]
+img / op / expand / vim / autopage / compact / pause
+theme / claude / codex / dark / light
+togglekey <key>
+clear / exit / version / pwd / whoami
 ```
 
-## vim 键位（默认开启，`vim` 命令切换）
+`img`, `op`, and `autopage` are also buttons in the status bar. The bar shows those flags and `page n of m` when the pager knows `m`. It does not show a fake context meter.
 
-| 按键 | 作用 |
-| --- | --- |
-| `j` / `k` | 向下 / 向上滚动 |
-| `h` / `l` | 上一页 / 下一页 |
-| `gg` / `G` | 顶部 / 底部 |
-| 数字前缀 | 如 `5j` 滚动 5 倍行距；板块页 `数字 + Enter` 直接开帖 |
-| `/` | 预填 `search: ` 并聚焦输入框 |
-| `:` | 聚焦输入框（不会显示冒号） |
-| `o` | 板块页预填 `open `，帖子页预填 `search: ` |
-| `ctrl+o` | 展开 / 收起截断楼层 |
+On a page with no thread and no topic list, the screen offers `help`, `board list`, and `board fid`. The favorites row stays visible when it is empty.
 
-## 其他特性
+`compact` shortens the welcome text. It is off by default, so the hints and the favorites row stay on screen.
 
-- 无限滚动：滚到底自动抓取下一页内容追加在下方（带 ── page N ── 分隔线，到底 / 失败有状态提示），帖子与板块列表通用
-- op 只看楼主模式：无限滚动自动改用 NGA 原生 `authorid` 分页抓取，整页都是楼主楼、连续追加在同一页，不用一页一页切换；手动翻页命令同样保持只看楼主语义
-- 双风格：Claude Code（欢迎框 + ❯ 提示符）与 Codex CLI（user/codex 对话块 + banner），各含明暗两套配色
-- 热点回复单独区块展示，OP 反色徽章，IP 属地显示（nuke.php 接口 + 本地缓存）
-- 图片原位渲染（占位 token 插回原文位置），主源失败自动回退备胎链接
-- 伪 shell 工作目录随页面变化（`~/boards/xxx`、`~/threads/xxx`），标题栏 / favicon 同步伪装
-- 设置（主题、图片、只看楼主、vim、autopage、收藏板块等）全部 GM 持久化
+`whoami` prints the name from the page header. If that node is missing or it is the logged-out label, the command prints `reader`.
+
+## Reading
+
+- Posts are clipped to 14 lines. Each post has its own expand control. `expand` or `Ctrl+o` opens all of them.
+- Images default to a `[image]` button so the page stays text. Click one to load it, or turn `img` on for lazy thumbnails. A failed image tries the link wrapped around it, then hides itself.
+- URLs in the post body are links. Links on an NGA host open in this tab. Other links open in a new tab.
+- `ls` lists every topic or post already loaded, not a fixed first page of 20.
+
+## Reply and quote
+
+`reply`, `reply <text>`, `reply <floor>`, and `quote <floor>` prepare a post as the user who is already logged in. `reply` with no text opens a multi-line box. Preview shows the body that will be sent. Nothing is submitted until you type `y`. `n` cancels. `edit` returns to the box. `Esc` cancels a pending confirm.
+
+The submit step copies the forum's own reply form (`post.php`), including whatever hidden fields that form already has, and posts it in a hidden iframe so the browser sends the session cookie and uses the form's charset. The script does not ask for a password and does not call any other host. If the form is not on the thread page, `y` loads `post.php?action=reply` for this tid first. NGA's visible error text (login, captcha, permission, and the rest) is printed in the panel. A failed send stays unposted so `y` can retry.
+
+## Development
+
+```sh
+npm install
+npm test
+```
+
+`npm test` runs `node --test tests/disguise.test.js` with jsdom and the HTML fixtures in `tests/fixtures/`. The tests do not contact NGA. Anonymous requests to the live site return 403 from this kind of environment, so the iframe submit, charset handling, and mirror-site DOM differences have not been verified in a browser session.
