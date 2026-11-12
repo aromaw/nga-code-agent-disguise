@@ -17,7 +17,7 @@ Tampermonkey 脚本。把 NGA（`bbs.nga.cn`、`ngabbs.com`、`bbs.ngacn.cc`、`
 
 版块和收藏在左侧。顶栏是版块、帖子、页码，以及当前的排序或筛选。楼层是消息卡片：楼层号、作者、时间和推荐数在头上，引用是嵌套块并带作者，`img` 打开时图片是缩略图，关闭时是 `[image]` 链接。长楼层会折叠，点击卡片或 `expand N more lines` 展开。
 
-底部输入框可以多行。Enter 或 Send 执行，Shift+Enter 换行。按钮和 `/` 菜单插入真实命令。`boards` 等于 `board list`。焦点在输入框里时，反引号不会关掉伪装。打开伪装会聚焦输入框。Esc，包括在输入框里，会盖上一屏深色的代码审阅会话。
+底部输入框可以多行。Enter 或 Send 执行，Shift+Enter 换行。输入 `/` 会弹出命令菜单，边输入边过滤，方向键移动，Enter 选中，Tab 补全（`/he` 变成 `/help`）。按钮插入同样的命令。`boards` 等于 `board list`。焦点在输入框里时，反引号不会关掉伪装，打开伪装的那一下也不会打进输入框。Esc，包括在输入框里，会用一整屏代码审阅界面（文件树、标签、带行号的 diff）盖住窗口。
 
 回复、新帖、收藏和投票都要按 Send 或 `y` 才会发出。Cancel 和 `n` 会按动作本身来写取消文案。
 
@@ -77,7 +77,8 @@ clear · exit · version · pwd
 
 ```sh
 npm install
-npm test
+npm test          # jsdom：disguise.test.js、fixes.test.js、dumps.test.js（没有 /workspace/nga-dom 时跳过 dumps）
+npm run shots     # 用 Playwright 对 dumps 截图，写到 /workspace/nga-dev-shots
 ```
 
-`npm test` 运行 `node --test tests/disguise.test.js`，使用 jsdom 和 `tests/fixtures/`。测试不访问 NGA。收藏、投票、发新帖和通知没有在正式站上验证过。
+`npm test` 使用 jsdom 和 `tests/fixtures/`，不访问 NGA。4.1.0 修了真实页面上的解析（重复楼层、引用头、搜索占位行、回帖数、版名空格、只看某作者时的楼层号）和桌面外壳（侧栏、斜杠菜单、整屏 Esc 遮罩）。详见 [CHANGELOG.md](CHANGELOG.md)。收藏、投票、发新帖和通知没有在正式站上验证过。

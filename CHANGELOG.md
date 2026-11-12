@@ -1,5 +1,27 @@
 # Changelog
 
+## 4.1.0
+
+Parsing follows the live NGA DOM. The overlay was tested against saved logged-in pages, and the boss-key cover, slash menu, and sidebar are the ones those pages need.
+
+### Fixed
+
+- Posts were counted twice: the parser read both `table.forumbox.postbox` and the nested `td#postcontainerN`. It now keeps one box per floor.
+- Author names are taken from the author link, quote `userlink`s, and `commonui.userInfo` when that object holds a real name. Bare numeric leftovers from a `UID:` label are not used as a display name. Names that NGA itself has not hydrated stay as `UID:…` until the page fills them in.
+- Quote headers show the quoted author and the time when the page has one. A "Reply to + R by [name]" line that is not wrapped in `.quote` is treated as a quote. `+R`, empty brackets, a leftover timestamp, and a leading zero-width space are stripped from the body.
+- The sidebar lists the current board, that board's sub-forums, saved boards, favorites from the favor page, and recent threads. It no longer picks up every forum link on the page. The board name drops NGA's spaced-out `&nbsp;` letters (`网事杂谈`, not `网 事 杂 谈`). Horizontal overflow is clipped.
+- The Esc cover is a full-viewport editor: a file tree, tabs, a numbered diff, and a status bar. The sidebar and the top bar are hidden while it is up.
+- Typing `/` opens a command menu that filters as you type. Arrow keys move, Enter selects (and runs a command that takes no argument), Tab completes `/he` to `/help`.
+- Search drops the placeholder rows titled `帖子发布或回复时间超过限制`. Reply counts come from `commonui.topicArg.add`, not from the unhydrated `0` in the table cell.
+- Author-filter floors come from `lN`, `postcontainerN`, and `postauthorN`, not from the row index, so floor 1 is `#1`.
+- The backtick that opens the overlay is not inserted into the composer.
+- Post text and metadata are larger and higher-contrast.
+
+### Added
+
+- jsdom tests for the live markup (`tests/fixes.test.js`, sanitized fixtures) and a dump harness (`tests/dumps.test.js`) that runs when `/workspace/nga-dom` is present.
+- `npm run shots` takes Playwright screenshots of the overlay against those dumps.
+
 ## 4.0.0
 
 The overlay is a desktop chat app, not a terminal. Parsing follows live NGA markup.

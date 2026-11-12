@@ -17,7 +17,7 @@ A Tampermonkey script that shows NGA (`bbs.nga.cn`, `ngabbs.com`, `bbs.ngacn.cc`
 
 Boards and bookmarks sit in the left sidebar. The top bar is the board, the thread, the page, and the active sort or filter. Posts are message cards: floor, author, time, and recommend count in the header, quotes as a nested block with the author, images as thumbnails when `img` is on and as an `[image]` link when it is off. Long posts collapse; click the card or `expand N more lines`.
 
-The composer is multi-line. Enter or Send runs the text. Shift+Enter inserts a line. Chips and a `/` menu insert real commands (`/help`, `/reply`, `/board`, and the rest). `boards` is the same as `board list`. A backtick does not close the overlay while the composer is focused. Opening the overlay focuses the composer. Esc, including from the composer, covers the screen with a dark code-review session.
+The composer is multi-line. Enter or Send runs the text. Shift+Enter inserts a line. Typing `/` opens a command menu that filters as you type; arrow keys move, Enter selects, and Tab completes (`/he` becomes `/help`). Chips insert the same commands. `boards` is the same as `board list`. A backtick does not close the overlay while the composer is focused, and the key that opens the overlay is not typed into the composer. Esc, including from the composer, covers the whole viewport with a code-review editor (file tree, tabs, a numbered diff).
 
 Send, and `y`, are required before a reply, a new thread, a bookmark, or a vote. Cancel, and `n`, name the thing you cancelled.
 
@@ -77,7 +77,10 @@ State-changing commands copy a form or link from the page when one is there. Oth
 
 ```sh
 npm install
-npm test
+npm test          # jsdom: disguise.test.js, fixes.test.js, dumps.test.js (dumps skipped if /workspace/nga-dom is absent)
+npm run shots     # Playwright screenshots against the dumps, written to /workspace/nga-dev-shots
 ```
+
+Version 4.1.0 fixes live NGA parsing (duplicate posts, quote headers, search placeholders, reply counts from `topicArg`, spaced board names, author-filter floors) and the desktop chrome (sidebar, slash menu, full-viewport Esc cover). See [CHANGELOG.md](CHANGELOG.md).
 
 `npm test` runs `node --test tests/disguise.test.js` with jsdom and `tests/fixtures/`. The tests do not contact NGA. Bookmark, vote, new-thread, and notification calls were not exercised against the live site.

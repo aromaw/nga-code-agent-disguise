@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NGA Code Agent Disguise
 // @namespace    https://github.com/aromaw/nga-code-agent-disguise
-// @version      4.0.0
+// @version      4.1.0
 // @description  Disguise NGA forum pages as a Claude Code / Codex CLI session. Backtick toggles outside text fields, /help lists commands, and reply/quote post through the site's own form after a confirm step.
 // @author       aromaw
 // @match        *://bbs.nga.cn/*
@@ -20,7 +20,7 @@
     'use strict';
 
     const TEST = typeof globalThis !== 'undefined' && !!globalThis.__CAD_TEST;
-    const VERSION = '4.0.0';
+    const VERSION = '4.1.0';
     const POST_PREVIEW_LINES = 14;
 
     /* ================= settings ================= */
@@ -63,6 +63,25 @@
         '',
         'The change stays inside handleRequest. Waiting on you.',
     ].join('\n');
+    const COVER_DIFF = [
+        { kind: 'hunk', text: '@@ src/server.ts @@' },
+        { kind: '', oldN: 1, newN: 1, text: "import { service } from './service';" },
+        { kind: '', oldN: 2, newN: 2, text: "import { response } from './errors';" },
+        { kind: '', oldN: 3, newN: 3, text: '' },
+        { kind: 'hunk', text: '@@ handleRequest @@' },
+        { kind: '', oldN: 41, newN: 41, text: 'export async function handleRequest(req: Request) {' },
+        { kind: '', oldN: 42, newN: 42, text: '  const result = await service.run(req);' },
+        { kind: 'del', oldN: 43, newN: '', text: '  return response.ok(result);' },
+        { kind: 'add', oldN: '', newN: 43, text: '  if (!result.ok) return response.error(result.error);' },
+        { kind: 'add', oldN: '', newN: 44, text: '  return response.ok(result);' },
+        { kind: '', oldN: 44, newN: 45, text: '}' },
+        { kind: '', oldN: 45, newN: 46, text: '' },
+        { kind: 'hunk', text: '@@ supports @@' },
+        { kind: '', oldN: 47, newN: 48, text: 'export function supports(method: string) {' },
+        { kind: 'del', oldN: 48, newN: '', text: '  return method === "GET";' },
+        { kind: 'add', oldN: '', newN: 49, text: '  return method === "GET" || method === "POST";' },
+        { kind: '', oldN: 49, newN: 50, text: '}' },
+    ];
     const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#0d0d0d"/><text x="50" y="70" font-size="62" text-anchor="middle" fill="#fff" font-family="monospace">›</text></svg>'
     );
@@ -73,38 +92,38 @@
     html.cad-on body { overflow:hidden !important; background:#0d0d0d; }
     html:not(.cad-on) #cad__root { display:none !important; }
 
-    #cad__root { --radius:6px; }
+    #cad__root { --radius:8px; }
     #cad__root.cad-claude.cad-dark {
-        --bg:#1f1e1d; --bg-input:#2b2a28;
-        --text:#e8e6dd; --dim:#9c9a93; --faint:#6b6a64;
-        --accent:#d97757; --accent2:#e8987d; --border:#3a3936; --link:#e8987d;
-        --bullet:#d97757; --green:#7fce8a; --band:rgba(217,119,87,.10);
+        --bg:#1f1e1d; --bg-input:#2f2e2c; --bg-side:#1a1918;
+        --text:#f4f2ea; --dim:#c5c3bb; --faint:#a09e96;
+        --accent:#d97757; --accent2:#efb19a; --border:#4a4945; --link:#efb19a;
+        --bullet:#d97757; --green:#8ed898; --band:rgba(217,119,87,.14);
     }
     #cad__root.cad-claude.cad-light {
-        --bg:#fbfaf6; --bg-input:#fbfaf6;
-        --text:#1f1e1d; --dim:#6f6e67; --faint:#a3a29a;
-        --accent:#c25d3f; --accent2:#b55c3d; --border:#e3e1d9; --link:#3b6fa0;
-        --bullet:#c25d3f; --green:#2e7d46; --band:#f6ede5;
+        --bg:#fbfaf6; --bg-input:#ffffff; --bg-side:#f3f1ea;
+        --text:#1a1918; --dim:#4f4e48; --faint:#6f6e67;
+        --accent:#c25d3f; --accent2:#a54d33; --border:#d4d1c8; --link:#2d5f8a;
+        --bullet:#c25d3f; --green:#22743c; --band:#f3e6db;
     }
     #cad__root.cad-codex.cad-dark {
-        --bg:#0d0d0d; --bg-input:#1a1a1a;
-        --text:#ececec; --dim:#a3a3a3; --faint:#6e6e6e;
-        --accent:#10a37f; --accent2:#2fd6a8; --border:#2e2e2e; --link:#2fd6a8;
-        --bullet:#10a37f; --green:#2fd6a8; --band:rgba(16,163,127,.10);
+        --bg:#0f0f0f; --bg-input:#1c1c1c; --bg-side:#0a0a0a;
+        --text:#f5f5f5; --dim:#c6c6c6; --faint:#9a9a9a;
+        --accent:#10a37f; --accent2:#3ee0b0; --border:#3a3a3a; --link:#3ee0b0;
+        --bullet:#10a37f; --green:#3ee0b0; --band:rgba(16,163,127,.16);
     }
     #cad__root.cad-codex.cad-light {
-        --bg:#ffffff; --bg-input:#ffffff;
-        --text:#0d0d0d; --dim:#5d5d5d; --faint:#8f8f8f;
-        --accent:#0b7a5e; --accent2:#10a37f; --border:#e5e5e5; --link:#0b7a5e;
-        --bullet:#0b7a5e; --green:#0b7a5e; --band:#e8f5f1;
+        --bg:#ffffff; --bg-input:#f7f7f7; --bg-side:#f3f3f3;
+        --text:#111111; --dim:#3f3f3f; --faint:#616161;
+        --accent:#0b7a5e; --accent2:#0b7a5e; --border:#d8d8d8; --link:#0b7a5e;
+        --bullet:#0b7a5e; --green:#0b7a5e; --band:#e5f6f0;
     }
 
     #cad__root {
         position:fixed; inset:0; z-index:2147483000;
         display:flex; flex-direction:column;
         background:var(--bg); color:var(--text);
-        font-family:"Segoe UI","PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",sans-serif;
-        font-size:15px; line-height:1.65; letter-spacing:0;
+        font-family:"Segoe UI","PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+        font-size:16px; line-height:1.65; letter-spacing:0;
     }
     #cad__root, #cad__root * { box-sizing:border-box; }
     #cad__root button { font:inherit; color:inherit; }
@@ -112,13 +131,13 @@
     /* The shell is one column inside the fixed root, so the post list scrolls and the prompt stays put. */
     .cad-app { flex:1; min-height:0; display:flex; flex-direction:row; overflow:hidden; }
     .cad-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--bg); }
-    .cad-side { width:248px; flex-shrink:0; border-right:1px solid var(--border); background:color-mix(in srgb, var(--text) 3%, var(--bg)); display:flex; flex-direction:column; min-height:0; overflow:auto; padding:14px 10px; }
-    .cad-brand { font-weight:650; font-size:14px; padding:4px 8px 12px; }
-    .cad-side-label { font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--dim); padding:10px 8px 4px; }
-    .cad-side a, .cad-side button.cad-sideitem { display:block; width:100%; text-align:left; border:0; background:transparent; color:var(--text); border-radius:8px; padding:7px 8px; text-decoration:none; }
+    .cad-side { width:252px; flex-shrink:0; min-width:0; border-right:1px solid var(--border); background:var(--bg-side, var(--bg)); display:flex; flex-direction:column; min-height:0; overflow-x:hidden; overflow-y:auto; padding:16px 10px 20px; }
+    .cad-brand { font-weight:680; font-size:15px; padding:4px 10px 14px; color:var(--text); }
+    .cad-side-label { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); padding:14px 10px 6px; font-weight:650; }
+    .cad-side a, .cad-side button.cad-sideitem { display:block; width:100%; max-width:100%; text-align:left; border:0; background:transparent; color:var(--text); border-radius:8px; padding:8px 10px; text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
     .cad-side a:hover, .cad-side button.cad-sideitem:hover, .cad-side .cad-onitem { background:var(--band); }
-    .cad-pill { border:1px solid var(--border); border-radius:999px; padding:2px 8px; font-size:12px; color:var(--dim); background:transparent; }
-    .cad-crumb { font-size:13px; color:var(--dim); }
+    .cad-pill { border:1px solid var(--border); border-radius:999px; padding:3px 10px; font-size:13px; color:var(--dim); background:transparent; }
+    .cad-crumb { font-size:14px; color:var(--text); font-weight:550; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .cad-modal { margin:8px 0 12px; }
     .cad-modal-card { border:1px solid var(--border); border-radius:12px; padding:12px 14px; background:var(--bg-input); color:var(--text); }
     #cad__root pre, #cad__root .cad-preview, #cad__root .cad-cover-code { background:transparent !important; color:var(--text) !important; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; }
@@ -149,7 +168,7 @@
     .cad-trow:hover { background:var(--band); }
     .cad-trow a.cad-tlink { color:inherit; text-decoration:none; min-width:0; }
     .cad-trow:hover a.cad-tlink { color:var(--accent2); }
-    .cad-trow .cad-meta { grid-column:3; font-size:11px; }
+    .cad-trow .cad-meta { grid-column:3; font-size:13px; color:var(--dim); }
     .cad-trep { display:inline-block; min-width:52px; text-align:right; padding-right:10px; color:var(--dim); }
     .cad-boards { margin:0 -22px 6px; padding:2px 22px; }
     .cad-boardcur { color:var(--accent2) !important; font-weight:700; }
@@ -157,7 +176,7 @@
     .cad-line { white-space:pre-wrap; word-break:break-word; }
     .cad-user { color:var(--text); font-weight:600; background:var(--band); margin:6px -22px 2px; padding:3px 22px; }
     .cad-user::before { content:'❯ '; color:var(--accent); font-weight:700; }
-    .cad-meta { color:var(--faint); font-size:12px; }
+    .cad-meta { color:var(--dim); font-size:13px; }
     .cad-dim { color:var(--dim); }
     .cad-faint { color:var(--faint); }
     .cad-img { display:block; max-width:min(480px, 100%); max-height:320px; border-radius:6px; margin:6px 0; border:1px solid var(--border); }
@@ -170,12 +189,12 @@
     .cad-ps1 { color:var(--green); }
     .cad-body::-webkit-scrollbar { width:10px; }
     .cad-body::-webkit-scrollbar-thumb { background:var(--border); border-radius:5px; border:2px solid var(--bg); }
-    .cad-title { font-size:18px; line-height:1.35; font-weight:650; margin:8px 0 2px; letter-spacing:-0.01em; }
-    .cad-kicker { color:var(--faint); font-size:12px; margin-bottom:12px; }
+    .cad-title { font-size:20px; line-height:1.35; font-weight:680; margin:8px 0 2px; letter-spacing:-0.015em; }
+    .cad-kicker { color:var(--dim); font-size:13.5px; margin-bottom:12px; }
     .cad-post { position:relative; margin:0 0 12px; padding:10px 14px 12px; border:1px solid var(--border); border-radius:8px; background:color-mix(in srgb, var(--text) 3.5%, transparent); }
     .cad-post.cad-collapsed { cursor:pointer; }
     .cad-post.cad-collapsed:hover { border-color:var(--accent); }
-    .cad-post .cad-posthead { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; color:var(--dim); font-size:13px; margin:0 0 8px; }
+    .cad-post .cad-posthead { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; color:var(--dim); font-size:14px; margin:0 0 8px; }
     .cad-floor { color:var(--accent); font-weight:700; min-width:2.2em; }
     .cad-author { color:var(--text); font-weight:650; padding:0; }
     .cad-likes { color:var(--accent2); }
@@ -186,7 +205,7 @@
     .cad-blocktag { display:inline-block; padding:0 8px; border-radius:4px; font-weight:700; background:var(--accent); color:var(--bg); font-size:12px; margin:6px 0 2px; }
     .cad-banner { border:1px solid var(--border); border-radius:8px; padding:8px 14px; color:var(--dim); margin-bottom:12px; font-size:12.5px; }
     .cad-banner b { color:var(--text); }
-    .cad-hints { flex-shrink:0; display:flex; flex-wrap:wrap; gap:6px; align-items:center; width:100%; box-sizing:border-box; padding:8px max(28px, calc((100% - 92ch) / 2)) 0; background:var(--bg); }
+    .cad-hints { flex-shrink:0; display:flex; flex-wrap:wrap; gap:6px; align-items:center; width:100%; box-sizing:border-box; padding:10px max(28px, calc((100% - 92ch) / 2)); background:var(--bg); border-top:1px solid var(--border); position:relative; z-index:3; }
     .cad-hint { border:1px solid var(--border); border-radius:999px; padding:2px 8px; color:var(--dim); background:transparent; }
     .cad-hint:hover { border-color:var(--accent); color:var(--accent2); }
     .cad-inputbar {
@@ -205,7 +224,7 @@
     }
     .cad-send { align-self:flex-end; background:var(--accent); color:var(--bg); border:0; border-radius:8px; padding:6px 14px; cursor:pointer; }
     .cad-inputbar { flex-direction:column; align-items:stretch; }
-    .cad-real::placeholder { color:var(--faint); }
+    .cad-real::placeholder { color:var(--faint); opacity:0.7; }
     .cad-cursor { width:8px; height:16px; background:var(--text); display:inline-block; flex-shrink:0; animation:cad-blink 1.06s step-end infinite; }
     @keyframes cad-blink { 50% { opacity:0; } }
     .cad-statusbar {
@@ -220,16 +239,46 @@
     .cad-statusbar .cad-flag { padding:0 4px; }
     .cad-pagesep { color:var(--faint); margin:12px 0 2px; display:flex; align-items:center; gap:10px; user-select:none; }
     .cad-pagesep::before, .cad-pagesep::after { content:''; flex:1; border-top:1px dashed var(--border); }
-    .cad-panel { max-height:none; overflow:visible; border:1px solid var(--border); border-radius:12px; background:var(--bg-input); color:var(--text); padding:12px 14px; margin:0 0 14px; }
+    .cad-panel { max-height:min(62vh, 540px); overflow:auto; border:1px solid var(--border); border-radius:12px; background:var(--bg-input); color:var(--text); padding:12px 14px; margin:0 0 14px; }
     .cad-panelhead { display:flex; justify-content:space-between; align-items:center; gap:12px; color:var(--accent2); position:sticky; top:0; background:var(--bg); }
     .cad-compose { width:100%; min-height:7em; margin:8px 0; background:var(--bg-input); color:inherit; border:1px solid var(--border); font:inherit; padding:8px; resize:vertical; }
     .cad-preview { white-space:pre-wrap; word-break:break-word; margin:8px 0; padding:8px 10px; border:1px dashed var(--border); border-radius:6px; }
-    /* cad-covered is on #cad__root; the thread, prompt, and reply panel live under .cad-app. */
+    /* cad-covered is on #cad__root. The cover is a full-viewport layer above the app chrome. */
+    .cad-covered .cad-app, .cad-covered .cad-side, .cad-covered .cad-topbar, .cad-covered .cad-main,
     .cad-covered .cad-body, .cad-covered .cad-inputbar, .cad-covered .cad-statusbar, .cad-covered .cad-panel, .cad-covered .cad-hints { display:none !important; }
     .cad-statusline { margin-top:14px; padding:8px 12px; border:1px solid var(--border); border-radius:8px; }
     .cad-statusline.cad-error { border-color:var(--accent); }
-    .cad-cover { flex:1; overflow:auto; padding:28px 32px; background:var(--bg); color:var(--text); }
-    .cad-cover-code { color:var(--dim) !important; background:transparent !important; line-height:1.7; white-space:pre-wrap; margin:0; }
+    .cad-qhead { color:var(--text); font-weight:650; font-size:13.5px; margin-bottom:4px; }
+    .cad-slash { position:absolute; left: max(28px, calc((100% - 92ch) / 2)); right: max(28px, calc((100% - 92ch) / 2)); bottom: calc(100% + 6px); z-index: 6; background:var(--bg-input); color:var(--text); border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,.35); padding:6px; max-height:min(320px, 50vh); overflow-y:auto; overflow-x:hidden; }
+    .cad-slash button, .cad-slash-item { display:flex; align-items:center; justify-content:space-between; width:100%; text-align:left; border:0; background:transparent; color:var(--text); border-radius:8px; padding:8px 12px; font-size:14px; cursor:pointer; }
+    .cad-slash button:hover, .cad-slash-item:hover, .cad-slash-item.cad-slash-on, .cad-slash .cad-slash-on { background:var(--band); color:var(--text); }
+    .cad-slash-cmd { font-weight:650; }
+    .cad-slash-hint { color:var(--dim); font-size:12.5px; margin-left:12px; }
+    .cad-cover { position:absolute; inset:0; z-index:40; display:flex; flex-direction:column; overflow:hidden; background:#0e0f11; color:#d7dbe0; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; }
+    .cad-cover-bar { flex-shrink:0; height:38px; display:flex; align-items:center; gap:8px; padding:0 12px; background:#16181c; border-bottom:1px solid #2a2e34; color:#9aa3ad; }
+    .cad-cover-bar i { width:10px; height:10px; border-radius:50%; display:block; }
+    .cad-cover-bar i:nth-child(1){background:#ff5f57;} .cad-cover-bar i:nth-child(2){background:#febc2e;} .cad-cover-bar i:nth-child(3){background:#28c840;}
+    .cad-cover-bar-title { flex:1; text-align:center; font-size:12px; color:#c5ccd3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .cad-cover-work { flex:1; min-height:0; display:flex; overflow:hidden; }
+    .cad-cover-tree { width:200px; flex-shrink:0; background:#121417; border-right:1px solid #2a2e34; padding:12px 0; overflow:auto; color:#9aa3ad; }
+    .cad-cover-tree .cad-cover-dir { padding:4px 14px; color:#7f8790; font-size:11px; letter-spacing:.04em; text-transform:uppercase; }
+    .cad-cover-tree .cad-cover-file { padding:4px 18px; color:#c5ccd3; }
+    .cad-cover-tree .cad-cover-file.cad-onitem { background:#1c3a4a; color:#dcefff; }
+    .cad-cover-editor { flex:1; min-width:0; display:flex; flex-direction:column; background:#0e0f11; }
+    .cad-cover-tabs { flex-shrink:0; display:flex; border-bottom:1px solid #2a2e34; background:#14161a; }
+    .cad-cover-tab { padding:8px 14px; color:#8b939c; border-right:1px solid #2a2e34; }
+    .cad-cover-tab.cad-onitem { color:#e8edf2; background:#0e0f11; }
+    .cad-cover-diff { flex:1; overflow:auto; padding:8px 0 8px; }
+    .cad-cover-foot { flex-shrink:0; height:28px; display:flex; align-items:center; padding:0 14px; background:#16181c; border-top:1px solid #2a2e34; color:#8b939c; font-size:11.5px; }
+    .cad-cover-hunk { color:#8b939c; padding:8px 16px; }
+    .cad-dline { display:grid; grid-template-columns:52px 52px 1fr; font-variant-numeric:tabular-nums; line-height:1.7; white-space:pre; }
+    .cad-dline span:nth-child(1), .cad-dline span:nth-child(2) { text-align:right; padding:0 8px; color:#66707a; border-right:1px solid #2a2e34; }
+    .cad-dline span:nth-child(3) { padding:0 14px; color:#d7dbe0; }
+    .cad-dline.cad-del { background:rgba(200,60,60,.14); }
+    .cad-dline.cad-del span:nth-child(3) { color:#ffb4b0; }
+    .cad-dline.cad-add { background:rgba(46,160,90,.14); }
+    .cad-dline.cad-add span:nth-child(3) { color:#b6f0c6; }
+    .cad-cover-code { color:#c5ccd3 !important; background:transparent !important; line-height:1.7; white-space:pre; margin:0; font-family:inherit; }
     .cad-idlebtn { color:var(--link); }
     @media (prefers-reduced-motion:reduce) { .cad-cursor { animation:none; } }
     @media (max-width:760px) {
@@ -353,6 +402,9 @@
     const revealedImages = new Set();
     const cmdHistory = [];
     let histIdx = -1;
+    let slashIndex = 0;
+    let suppressToggleChar = false;
+    let openedAt = 0;
     const locMap = {};
     let boards = GM_getValue('cad_boards', []);
     let savedThreads = GM_getValue('cad_threads', []);
@@ -456,13 +508,26 @@
         return '';
     }
 
+    function tidyName(s) {
+        let t = String(s || '').replace(/\u00a0/g, ' ').replace(/[\u200b\u200c\u200d]/g, '').replace(/\s+/g, ' ').trim();
+        // NGA sometimes letter-spaces a board name with regular spaces or nbsp ("网 事 杂 谈").
+        if (/^([\u4e00-\u9fff]\s+)+[\u4e00-\u9fff]$/.test(t)) t = t.replace(/\s+/g, '');
+        return t;
+    }
+
     function pageBoardName(doc) {
         doc = doc || document;
         const fid = pageFid(doc);
         if (!fid) return '';
-        const links = [...doc.querySelectorAll('a[href*="fid="]')].reverse();
-        const hit = links.find(a => fidFromHref(a.getAttribute('href')) === fid && text(a));
-        return hit ? text(hit) : '';
+        const bad = /^(后页|前页|发表新帖|精华区|下一页|上一页|首页|尾页|[\d\s.]+)$/;
+        const links = [...doc.querySelectorAll('#m_nav a[href*="fid="], .nav_link[href*="fid="], #breadcrumbs a[href*="fid="], .crumbs a[href*="fid="], a[href*="fid="]')];
+        const named = links.filter(a => {
+            if (fidFromHref(a.getAttribute('href')) !== fid) return false;
+            const n = tidyName(a.textContent);
+            return n && !bad.test(n) && !/recommend=|order_by=|page=/.test(a.getAttribute('href') || '');
+        });
+        const hit = named.find(a => a.closest && a.closest('#m_nav, .nav, #breadcrumbs, .crumbs')) || named[named.length - 1] || named[0];
+        return hit ? tidyName(hit.textContent) : '';
     }
 
     function curTid() {
@@ -495,10 +560,11 @@
         // Header-only. A thread is full of profile links, and the first one is not the viewer.
         const sels = ['#user_name', '#nickname', 'a.userlink', '#ngainfobar a[href*="func=ucp"]', '#header a[href*="func=ucp"]'];
         for (const sel of sels) {
-            const name = text(document.querySelector(sel));
+            const name = tidyName(text(document.querySelector(sel)));
             if (!name) continue;
             // NGA's logged-out header uses these labels.
             if (/^(\u767b\u5f55|\u767b\u5165|login|sign in)$/i.test(name)) continue;
+            if (isUidLabel(name)) continue;
             return name;
         }
         return '';
@@ -520,9 +586,13 @@
     }
 
     function stripQuoteHeader(s) {
-        return String(s || '')
-            .replace(/^(?:Reply\s+to\s+)?(?:\+R\s+by|Reply(?:\s+to)?(?:\s+\+R\s+by)?|Post\s+by)[^\n]*$/gim, '')
-            .replace(/\bundefined\b/gi, '');
+        let t = String(s || '').split(String.fromCharCode(0x200b)).join('').replace(/^\s+/, '');
+        t = t.replace(/^(?:Reply\s+to\s*)?(?:\+?\s*R\s+)?by\s*(?:\[[^\]]*\]|\S+)?\s*(?:\([^)]*\))?\s*/i, '');
+        t = t.replace(/^(?:Reply\s+to\s+)?(?:\+R\s+by|Reply(?:\s+to)?(?:\s+\+R\s+by)?|Post\s+by)[^\n]*/gim, '');
+        t = t.replace(/\bundefined\b/gi, '');
+        t = t.replace(/^\(\s*\)\s*/, '');
+        t = t.replace(/^(?:\[[^\]]*\]\s*)?\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?\s*/, '');
+        return t;
     }
 
     function cleanText(s) {
@@ -555,6 +625,7 @@
         if (!node) return { text: '', imgs: [] };
         const clone = node.cloneNode(true);
         clone.querySelectorAll('.quote').forEach(q => q.remove());
+        stripInlineReplyChrome(clone);
         const imgs = [];
         clone.querySelectorAll('img').forEach(i => {
             if (isEmote(i)) {
@@ -572,10 +643,207 @@
     }
 
     function cleanTitle(t) {
-        let s = String(t || '');
+        let s = tidyName(t);
         const filtered = s.match(/\u5728\s*(.*?)\s*\u4e2d\u7684\u56de\u590d/);
         if (filtered && filtered[1]) s = filtered[1];
         return s.replace(/[\s\-_]*(\u004eGA\u73a9\u5bb6\u793e\u533a|\u827e\u6cfd\u62c9\u65af\u56fd\u5bb6\u5730\u7406\u8bba\u575b|NGA)\s*$/i, '').replace(/^[-–—\s]+|[-–—\s]+$/g, '').trim();
+    }
+
+    function isUidLabel(s) {
+        return /^(UID\s*[:：]?\s*)?\d+$/i.test(String(s || '').trim());
+    }
+
+    function cleanAuthorName(s) {
+        return tidyName(String(s || '')
+            .replace(/\u697c\u4e3b/g, '')
+            .replace(/^\[+|\]+$/g, '')
+            .replace(/^['"`]+|['"`]+$/g, ''));
+    }
+
+    function isJunkTopicTitle(t) {
+        return /\u5e16\u5b50\u53d1\u5e03\u6216\u56de\u590d\u65f6\u95f4\u8d85\u8fc7\u9650\u5236/.test(String(t || ''));
+    }
+
+    function unquoteJsArg(s) {
+        s = String(s || '').trim();
+        if (!s || s === 'null' || s === 'undefined') return '';
+        const dol = s.match(/^\$\(\s*(['"])(.*?)\1\s*\)$/);
+        if (dol) return dol[2];
+        if ((s.charAt(0) === "'" && s.charAt(s.length - 1) === "'") || (s.charAt(0) === '"' && s.charAt(s.length - 1) === '"')) {
+            return s.slice(1, -1);
+        }
+        return s;
+    }
+
+    function splitJsArgs(src) {
+        const parts = [];
+        let cur = '';
+        let depth = 0;
+        let inStr = false;
+        let quote = '';
+        let esc = false;
+        for (let i = 0; i < src.length; i++) {
+            const c = src[i];
+            if (inStr) {
+                cur += c;
+                if (esc) esc = false;
+                else if (c === '\\') esc = true;
+                else if (c === quote) inStr = false;
+            } else if (c === '"' || c === "'") {
+                inStr = true;
+                quote = c;
+                cur += c;
+            } else if (c === '(' || c === '[' || c === '{') {
+                depth++;
+                cur += c;
+            } else if (c === ')' || c === ']' || c === '}') {
+                depth--;
+                cur += c;
+            } else if (c === ',' && depth === 0) {
+                parts.push(cur.trim());
+                cur = '';
+            } else cur += c;
+        }
+        if (cur.trim()) parts.push(cur.trim());
+        return parts.map(unquoteJsArg);
+    }
+
+    function formatUnix(ts) {
+        const n = parseInt(ts, 10);
+        if (!Number.isFinite(n) || n < 1e9) return '';
+        const d = new Date(n * 1000);
+        if (isNaN(d.getTime())) return '';
+        const p = x => String(x).padStart(2, '0');
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+
+    function scriptTexts(doc) {
+        return [...(doc || document).querySelectorAll('script')].map(s => s.textContent || '').filter(Boolean);
+    }
+
+    function parseTopicArgs(doc) {
+        doc = doc || document;
+        const out = [];
+        const re = /commonui\.topicArg\.add\s*\(/g;
+        for (const src of scriptTexts(doc)) {
+            let m;
+            while ((m = re.exec(src))) {
+                let depth = 1;
+                let inStr = false;
+                let quote = '';
+                let esc = false;
+                const start = m.end ? m.end() : (m.index + m[0].length);
+                // m.end is not standard; use index + length
+                const from = m.index + m[0].length;
+                let end = from;
+                for (let i = from; i < src.length; i++) {
+                    const c = src[i];
+                    if (inStr) {
+                        if (esc) esc = false;
+                        else if (c === '\\') esc = true;
+                        else if (c === quote) inStr = false;
+                    } else if (c === '"' || c === "'") {
+                        inStr = true;
+                        quote = c;
+                    } else if (c === '(') depth++;
+                    else if (c === ')') {
+                        depth--;
+                        if (depth === 0) { end = i; break; }
+                    }
+                }
+                const args = splitJsArgs(src.slice(from, end));
+                if (args.length < 15) continue;
+                const idReplies = args[0];
+                const idTopic = args[1];
+                const idAuthor = args[2];
+                const idPostTime = args[3];
+                const idReplier = args[4];
+                const idReplyTime = args[5];
+                out.push({
+                    idReplies, idTopic, idAuthor, idPostTime, idReplier, idReplyTime,
+                    fid: args[7],
+                    tid: String(args[8] || '').replace(/\D+/g, ''),
+                    pid: args[9],
+                    postdate: formatUnix(args[12]),
+                    lastpost: formatUnix(args[13]),
+                    replies: String(parseInt(args[14], 10) || 0),
+                    postTs: args[12],
+                    lastTs: args[13],
+                });
+            }
+        }
+        return out;
+    }
+
+    function parseUserInfoMap(doc) {
+        doc = doc || document;
+        const map = Object.create(null);
+        const take = (uid, name) => {
+            const id = String(uid || '').replace(/\D+/g, '');
+            const n = cleanAuthorName(name);
+            if (!id || !n || isUidLabel(n)) return;
+            map[id] = n;
+        };
+        const tryJson = raw => {
+            try {
+                return JSON.parse(String(raw).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' '));
+            } catch (err) { return null; }
+        };
+        const extractBalanced = (src, from) => {
+            const i = src.indexOf('{', from);
+            if (i < 0) return '';
+            let depth = 0, inStr = false, esc = false;
+            for (let j = i; j < src.length; j++) {
+                const c = src[j];
+                if (inStr) {
+                    if (esc) esc = false;
+                    else if (c === '\\') esc = true;
+                    else if (c === '"') inStr = false;
+                } else if (c === '"') inStr = true;
+                else if (c === '{') depth++;
+                else if (c === '}') {
+                    depth--;
+                    if (depth === 0) return src.slice(i, j + 1);
+                }
+            }
+            return '';
+        };
+        for (const src of scriptTexts(doc)) {
+            let idx = 0;
+            while ((idx = src.indexOf('commonui.userInfo.setAll', idx)) >= 0) {
+                const raw = extractBalanced(src, idx);
+                idx += 24;
+                const data = raw && tryJson(raw);
+                if (!data || typeof data !== 'object') continue;
+                Object.keys(data).forEach(k => {
+                    const u = data[k];
+                    if (u && typeof u === 'object') take(u.uid || k, u.username || u.nickname || u.name);
+                });
+            }
+            const ucp = src.match(/__UCPUSER\s*=\s*(\{[\s\S]*?\})\s*;/);
+            if (ucp) {
+                const data = tryJson(ucp[1]);
+                if (data) take(data.uid, data.username || data.nickname || data.name);
+            }
+        }
+        (doc || document).querySelectorAll('a[href*="uid="], a.userlink, a.author, [id^="postauthor"]').forEach(a => {
+            const href = a.getAttribute('href') || '';
+            const uid = (href.match(/uid=(\d+)/) || [])[1] || '';
+            take(uid, a.textContent);
+        });
+        return map;
+    }
+
+    let userNameMap = Object.create(null);
+
+    function resolveAuthorName(raw, uid) {
+        const fromMap = uid && userNameMap[String(uid)];
+        if (fromMap && !isUidLabel(fromMap)) return fromMap;
+        const name = cleanAuthorName(raw);
+        if (name && !isUidLabel(name)) return name;
+        if (fromMap) return fromMap;
+        if (name) return name;
+        return uid || 'user';
     }
 
     function extractTopics(doc, baseUrl) {
@@ -584,42 +852,72 @@
         const abs = u => { try { return new URL(u, baseUrl).href; } catch (err) { return u || '#'; } };
         const rows = [...doc.querySelectorAll('.topicrow')];
         if (!rows.length) return null;
+        userNameMap = Object.assign(Object.create(null), parseUserInfoMap(doc), userNameMap);
+        const topicArgs = parseTopicArgs(doc);
+        const argByTopicId = Object.create(null);
+        const argByRepliesId = Object.create(null);
+        const argByTid = Object.create(null);
+        topicArgs.forEach(a => {
+            if (a.idTopic) argByTopicId[a.idTopic] = a;
+            if (a.idReplies) argByRepliesId[a.idReplies] = a;
+            if (a.tid) argByTid[a.tid] = a;
+        });
         const board = cleanTitle(
-            text(doc.querySelector('#m_nav .nav_link:last-child, .nav_link:last-child'))
+            tidyName((doc.querySelector('#m_nav .nav_link:last-child, #m_nav a.nav_link:last-of-type') || {}).textContent || '')
+            || pageBoardName(doc)
+            || tidyName(text(doc.querySelector('.nav_link:last-child')))
             || realTitle || document.title
         ) || 'board';
-        return {
-            kind: 'topics',
-            board,
-            topics: rows.map(r => {
-                const titleEl = r.querySelector('.c2 .topic, .c2 .topic_title');
-                let a = titleEl ? (titleEl.closest('a') || titleEl.querySelector('a')) : null;
-                if (!a) {
-                    a = [...r.querySelectorAll('.c2 a[href*="read.php"], .c2 a[href*="tid="]')]
-                        .sort((x, y) => y.textContent.trim().length - x.textContent.trim().length)[0];
-                }
-                const title = text(titleEl) || text(a);
-                const href = abs((a && a.getAttribute('href')) || (titleEl && titleEl.getAttribute('href')) || '');
-                return {
-                    title: title || '(no title)',
-                    href,
-                    replies: text(r.querySelector('.c1')).replace(/\D+/g, ''),
-                    author: text(r.querySelector('.c3 .author')) || text(r.querySelector('.c3 a')),
-                    postDate: text(r.querySelector('.c3 .postdate')),
-                    replyDate: text(r.querySelector('.c4 .replydate')),
-                    replyer: text(r.querySelector('.c4 .replyer')),
-                };
-            }).filter(t => t.title),
-        };
+        const topics = rows.map(r => {
+            const titleEl = r.querySelector('.c2 .topic, .c2 .topic_title, a[id^="t_tt"]');
+            let a = titleEl ? (titleEl.closest('a') || titleEl.querySelector('a') || (titleEl.tagName === 'A' ? titleEl : null)) : null;
+            if (!a) {
+                a = [...r.querySelectorAll('.c2 a[href*="read.php"], .c2 a[href*="tid="]')]
+                    .sort((x, y) => y.textContent.trim().length - x.textContent.trim().length)[0];
+            }
+            const title = tidyName(text(titleEl) || text(a));
+            const hrefRaw = (a && a.getAttribute('href')) || (titleEl && titleEl.getAttribute('href')) || '';
+            const href = abs(hrefRaw);
+            const tid = ((href || '').match(/tid=(\d+)/) || [])[1] || '';
+            const titleId = (a && a.id) || (titleEl && titleEl.id) || '';
+            const repliesEl = r.querySelector('.c1 .replies, a[id^="t_rc"], .c1 a');
+            const repliesId = (repliesEl && repliesEl.id) || '';
+            const arg = (titleId && argByTopicId[titleId]) || (repliesId && argByRepliesId[repliesId]) || (tid && argByTid[tid]) || null;
+            const domReplies = text(r.querySelector('.c1')).replace(/\D+/g, '');
+            const replies = (arg && arg.replies) || (domReplies && domReplies !== '0' ? domReplies : '') || domReplies || '0';
+            const authorEl = r.querySelector('.c3 .author, .c3 a[id^="t_ta"], .c3 a[href*="uid="]');
+            const authorUid = authorEl ? (((authorEl.getAttribute('href') || '').match(/uid=(\d+)/) || [])[1] || '') : '';
+            let author = tidyName(text(authorEl));
+            if (!author || isUidLabel(author)) author = resolveAuthorName(author, authorUid);
+            const postDate = tidyName(text(r.querySelector('.c3 .postdate, [id^="t_pt"]'))) || (arg && arg.postdate) || '';
+            const replyDate = tidyName(text(r.querySelector('.c4 .replydate, [id^="t_rt"]'))) || (arg && arg.lastpost) || '';
+            const replyer = tidyName(text(r.querySelector('.c4 .replyer, [id^="t_tr"]')));
+            return {
+                title: title || (tid ? 'tid ' + tid : ''),
+                href,
+                tid,
+                replies: String(replies || '0'),
+                author: author || '',
+                postDate,
+                replyDate,
+                replyer,
+            };
+        }).filter(t => {
+            if (isJunkTopicTitle(t.title)) return false;
+            if (t.title) return Boolean(t.tid || t.href);
+            return Boolean(t.tid);
+        });
+        return { kind: 'topics', board, topics };
     }
 
     function postUid(b) {
+        const named = b.querySelector('a[name="uid"]');
+        if (named) {
+            const n = text(named).replace(/\D+/g, '');
+            if (n) return n;
+        }
         const uidLink = b.querySelector('a[href*="uid="]');
-        const uidEl = b.querySelector('[id^="postauthor"]');
-        return text(b.querySelector('a[name="uid"]'))
-            || (((uidLink && uidLink.getAttribute('href')) || '').match(/uid=(\d+)/) || [])[1]
-            || (((uidEl && uidEl.id) || '').match(/postauthor(\d+)/) || [])[1]
-            || '';
+        return (((uidLink && uidLink.getAttribute('href')) || '').match(/uid=(\d+)/) || [])[1] || '';
     }
 
     function pidFromNode(node) {
@@ -652,7 +950,63 @@
             const m = String(n.id || n.getAttribute('name') || '').match(/^l(\d+)$/i);
             if (m) return parseInt(m[1], 10);
         }
+        const ids = [b.id, ...[...b.querySelectorAll('[id^="postcontainer"], [id^="postauthor"], [id^="post1strow"], [id^="postcontent"]')].map(el => el.id)].join(' ');
+        const idFloor = ids.match(/post(?:container|author|1strow|content)(\d+)/i);
+        if (idFloor) return parseInt(idFloor[1], 10);
         return i;
+    }
+
+    function quoteTimeFrom(node) {
+        if (!node) return '';
+        const el = node.querySelector('span.xtxt, span.silver, .xtxt.silver, span[class*="xtxt"]');
+        if (!el) return '';
+        return tidyName(el.textContent).replace(/\bundefined\b/gi, '').replace(/^[()]+|[()]+$/g, '').trim();
+    }
+
+    function stripInlineReplyChrome(root) {
+        if (!root) return;
+        const nodes = [...root.childNodes];
+        for (const n of nodes) {
+            if (n.nodeType === 3 && /^\s*Reply\s+to\s*/i.test(n.nodeValue || '')) {
+                n.nodeValue = (n.nodeValue || '').replace(/^\s*Reply\s+to\s*/i, '');
+            }
+        }
+        root.querySelectorAll('a.block_txt, a[onclick*="fastViewPost"], a[title*="\u6253\u5f00\u94fe\u63a5"], a[title*="\u5feb\u901f\u6d4f\u89c8"]').forEach(a => {
+            if (!a.closest('.quote')) a.remove();
+        });
+        // The Reply-to header is "Reply to + R by [name] (time)" and is not wrapped in .quote.
+        // After dropping the +/R chrome, strip the leftover by-line so it does not land in the body.
+        const kids = [...root.childNodes];
+        for (const n of kids) {
+            if (n.nodeType === 3) {
+                const v = n.nodeValue || '';
+                if (/^\s*(by\s*)?\[?\s*\]?\s*$/i.test(v)) { n.remove(); continue; }
+                if (/\S/.test(v)) break;
+                n.remove();
+                continue;
+            }
+            if (n.nodeType !== 1) { n.remove(); continue; }
+            const tag = (n.tagName || '').toLowerCase();
+            const cls = String(n.className || '');
+            const isUser = tag === 'a' && (n.classList.contains('userlink') || (n.getAttribute('href') || '').includes('uid='));
+            const isTime = tag === 'span' && /xtxt|silver/.test(cls);
+            if (isUser || isTime || tag === 'br') { n.remove(); continue; }
+            break;
+        }
+    }
+
+    function extractInlineReplyQuote(content) {
+        if (!content) return null;
+        if (content.querySelector('.quote')) return null;
+        const uidLink = content.querySelector('a[href*="uid="], a.userlink');
+        const firstText = [...content.childNodes].find(n => n.nodeType === 3 && /\S/.test(n.nodeValue || ''));
+        const lead = firstText ? firstText.nodeValue : '';
+        if (!/Reply\s+to/i.test(lead) && !/Reply\s+to/i.test(content.textContent.slice(0, 80))) return null;
+        if (!uidLink) return null;
+        const uid = ((uidLink.getAttribute('href') || '').match(/uid=(\d+)/) || [])[1] || '';
+        const author = resolveAuthorName(uidLink.textContent, uid);
+        const time = quoteTimeFrom(content);
+        return { depth: 0, text: '', author, time, uid, pid: pidFromNode(content) };
     }
 
     function parseQuoteNode(q) {
@@ -664,40 +1018,51 @@
         }
         const clone = q.cloneNode(true);
         clone.querySelectorAll('.quote').forEach(x => x.remove());
-        const uidLink = clone.querySelector('a[href*="uid="]');
+        const uidLink = clone.querySelector('a[href*="uid="], a.userlink');
         const uid = uidLink ? (((uidLink.getAttribute('href') || '').match(/uid=(\d+)/) || [])[1] || '') : '';
-        const author = uidLink ? text(uidLink) : '';
+        let author = uidLink ? resolveAuthorName(uidLink.textContent, uid) : '';
+        let time = quoteTimeFrom(clone);
         const pid = pidFromNode(clone);
+        clone.querySelectorAll('a.block_txt, a[onclick*="fastViewPost"], a[title*="\u6253\u5f00\u94fe\u63a5"], a[title*="\u5feb\u901f\u6d4f\u89c8"]').forEach(a => a.remove());
+        if (uidLink) uidLink.remove();
+        const timeEl = clone.querySelector('span.xtxt, span.silver, .xtxt.silver, span[class*="xtxt"]');
+        if (timeEl) timeEl.remove();
         let raw = cleanText(plainText(clone));
-        let time = '';
         let name = author;
         const header = raw.match(/^(?:Reply\s+to\s+)?(?:\+R\s+by|Post\s+by|Reply)\s+(?:\[([^\]]+)\]|([^\s(]+))\s*(?:\(([^)]*)\))?\s*/i);
         if (header) {
-            if (!name) name = (header[1] || header[2] || '').trim();
-            time = (header[3] || '').replace(/undefined/ig, '').trim();
+            if (!name || isUidLabel(name)) name = cleanAuthorName(header[1] || header[2] || '');
+            if (!time) time = (header[3] || '').replace(/undefined/ig, '').trim();
             raw = raw.slice(header[0].length);
         }
-        raw = raw.replace(/\bundefined\b/gi, '');
+        raw = raw
+            .replace(/^(?:Reply\s+to\s*)?['"\s]*by\s*['"\s]*/i, '')
+            .replace(/^\+R\s+by\s+/i, '')
+            .replace(/^['"`\s]+/, '')
+            .replace(/\bundefined\b/gi, '');
         return { depth, text: cleanText(raw), author: name, time, uid, pid };
     }
 
     function parsePost(b, i, opUid) {
         const content = b.querySelector('.postcontent, [id^="postcontent"]');
-        const infoText = text(b.querySelector('[class*="postinfo" i]')) || text(b.querySelector('.postBtnPos'));
-        const dateM = infoText.match(/\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?/);
+        const infoText = text(b.querySelector('[class*="postinfo" i], [id^="postInfo"], [id^="postdate"]')) || text(b.querySelector('.postBtnPos'));
+        const dateEl = b.querySelector('[id^="postdate"], .postdatec, .postinfot');
+        const dateM = (dateEl ? text(dateEl) : infoText).match(/\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?/);
         const uid = postUid(b);
         let pid = postPid(b);
-        let name = text(b.querySelector('.posterinfo .author, .posterInfoLine .author'))
-            || text(b.querySelector('[id^="postauthor"]')) || uid || 'user';
+        const rawName = text(b.querySelector('.posterinfo .author, .posterInfoLine .author, a.author, [id^="postauthor"]'))
+            || text(b.querySelector('[id^="postauthor"]')) || '';
+        let name = resolveAuthorName(rawName, uid);
         let authorFiltered = false;
         try { authorFiltered = new URL(location.href).searchParams.has('authorid'); } catch (err) { authorFiltered = false; }
-        const isOP = /\u697c\u4e3b/.test(name) || (!authorFiltered && opUid && uid && uid === opUid);
-        name = name.replace(/\u697c\u4e3b/g, '').replace(/^\[|\]$/g, '').replace(/^UID\s*[:：]\s*/i, '').trim() || uid || 'user';
+        const isOP = /\u697c\u4e3b/.test(rawName) || (!authorFiltered && opUid && uid && uid === opUid);
         const likeEl = b.querySelector('.recommendvalue');
         const likes = likeEl ? recommendScore(text(likeEl)) : '';
         const quotes = content
             ? [...content.querySelectorAll('.quote')].map(parseQuoteNode).filter(q => q.text || q.author)
             : [];
+        const inline = extractInlineReplyQuote(content);
+        if (inline && !quotes.length) quotes.push(inline);
         if (!pid) pid = (quotes.find(q => q.pid) || {}).pid || '';
         const floor = postFloor(b, i, infoText);
         const head = [
@@ -707,7 +1072,7 @@
             likes !== '' ? formatScore(likes) : '',
         ].filter(Boolean).join(' · ');
         const body = contentText(content);
-        const id = 'floor:' + floor + ':' + uid;
+        const id = 'floor:' + floor + ':' + uid + ':' + (pid || i);
         return { id, floor, pid, head, uid, name, isOP, date: dateM && dateM[0] || '', likes, text: body.text, imgs: body.imgs, quotes };
     }
 
@@ -726,23 +1091,38 @@
         return [];
     }
 
+    function uniqueBoxes(list) {
+        const seen = new Set();
+        const out = [];
+        for (const el of list) {
+            if (!el || seen.has(el)) continue;
+            if (list.some(other => other && other !== el && other.contains(el))) continue;
+            seen.add(el);
+            out.push(el);
+        }
+        return out;
+    }
+
     function postBoxes(doc) {
-        const direct = [...doc.querySelectorAll('.forumbox.postbox, table.postbox, [id^="postcontainer"]')];
-        if (direct.length) return direct;
+        const tables = uniqueBoxes([...doc.querySelectorAll('.forumbox.postbox, table.postbox')]);
+        if (tables.length) return tables;
+        const containers = uniqueBoxes([...doc.querySelectorAll('[id^="postcontainer"]')]);
+        if (containers.length) return containers;
         const seen = new Set();
         const boxes = [];
         doc.querySelectorAll('.postcontent, [id^="postcontent"]').forEach(el => {
             const box = el.closest('table, .forumbox, [id^="post"]') || el.parentElement;
             if (box && !seen.has(box)) { seen.add(box); boxes.push(box); }
         });
-        return boxes;
+        return uniqueBoxes(boxes);
     }
 
     function extractPosts(doc, opUidOverride) {
         doc = doc || document;
+        userNameMap = Object.assign(Object.create(null), parseUserInfoMap(doc), userNameMap);
         const allBoxes = postBoxes(doc);
         if (!allBoxes.length) return null;
-        const elTitle = text(doc.querySelector('#toppedtopic .topic, .catetitle, h1 .topic'));
+        const elTitle = text(doc.querySelector('#toppedtopic .topic, .catetitle, h1 .topic, #postsubject0, [id^="postsubject"]'));
         const title = cleanTitle(elTitle || realTitle || document.title);
         const hotBoxes = findHotBoxes(doc);
         const boxes = allBoxes.filter(b => !hotBoxes.some(hb => hb === b || hb.contains(b)));
@@ -753,7 +1133,7 @@
         const opUid = opUidOverride !== undefined ? opUidOverride
             : (authorFiltered ? '' : ((opUidTid === curTid() && opUidSticky) || (markedOP ? postUid(markedOP) : curPageNo() <= 1 ? postUid(boxes[0]) : '')));
         const posts = boxes.map((b, i) => parsePost(b, i, opUid));
-        if (opUidOverride === undefined && posts.length && posts[0].text.startsWith(title)) {
+        if (opUidOverride === undefined && posts.length && title && posts[0].text.startsWith(title)) {
             posts[0].text = cleanText(posts[0].text.slice(title.length));
         }
         const hot = doc === document
@@ -786,12 +1166,83 @@
         return out;
     }
 
+    const JUNK_BOARD_NAME = /^(后页|前页|发表新帖|精华区|下一页|上一页|首页|尾页|后页|\[\s*\]|\d+)$/;
+
+    function discoverPageBoards(doc) {
+        doc = doc || document;
+        const out = [];
+        const seen = new Set();
+        const add = (fid, name) => {
+            const id = String(fid || '').trim();
+            if (!id || !/^-?\d+$/.test(id) || seen.has(id)) return;
+            const label = tidyName(name).replace(/^\[|\]$/g, '').trim();
+            if (label && (JUNK_BOARD_NAME.test(label) || /^\d+$/.test(label) || /^https?:/i.test(label) || /更多内容|BUG\s*反馈|建议及/.test(label))) return;
+            seen.add(id);
+            out.push({ fid: id, name: label || ('fid ' + id) });
+        };
+        add(pageFid(doc), pageBoardName(doc));
+        (boards || []).forEach(b => add(b.fid, b.name));
+        const pick = sel => [...doc.querySelectorAll(sel)];
+        const subRoot = doc.getElementById('sub_forums') || doc.getElementById('sub_forums_c') || doc.querySelector('.subforum');
+        const candidates = [
+            ...pick('#m_nav a[href*="fid="]'),
+            ...pick('.nav_link[href*="fid="]'),
+            ...(subRoot ? [...subRoot.querySelectorAll('a[href*="fid="]')] : []),
+            ...pick('#favorite_forums a[href*="fid="], #favor_forums a[href*="fid="], #userinfo a[href*="fid="], #ucp a[href*="thread.php"][href*="fid="]'),
+        ];
+        candidates.forEach(a => {
+            const href = a.getAttribute('href') || '';
+            if (/recommend=|order_by=|page=|favor=|key=|authorid=|content=/.test(href) && !/ff=/.test(href)) return;
+            add(fidFromHref(href), a.textContent);
+        });
+        return out;
+    }
+
+    function rememberRecent(entry) {
+        const tid = String(entry && entry.tid || '');
+        if (!tid) return;
+        let recent = GM_getValue('cad_recent', []);
+        if (!Array.isArray(recent)) recent = [];
+        recent = recent.filter(t => String(t.tid) !== tid);
+        recent.unshift({ tid, fid: String(entry.fid || ''), title: entry.title || ('tid ' + tid) });
+        if (recent.length > 20) recent.length = 20;
+        GM_setValue('cad_recent', recent);
+    }
+
+    function sidebarThreads() {
+        const out = [];
+        const seen = new Set();
+        const add = t => {
+            const tid = String(t && t.tid || ((t && t.href) || '').match(/tid=(\d+)/) && ((t.href || '').match(/tid=(\d+)/) || [])[1] || '');
+            if (!tid || seen.has(tid)) return;
+            const title = tidyName(t.title) || ('tid ' + tid);
+            if (isJunkTopicTitle(title)) return;
+            seen.add(tid);
+            const href = t.href || ('/read.php?tid=' + encodeURIComponent(tid));
+            out.push({ tid, title, href, fid: t.fid || '' });
+        };
+        (savedThreads || []).forEach(add);
+        const recent = GM_getValue('cad_recent', []);
+        if (Array.isArray(recent)) recent.forEach(add);
+        if (document.querySelector('#m_threads') && /favor=/.test(location.search || location.href)) {
+            const data = extractTopics();
+            if (data && data.topics) data.topics.forEach(add);
+        }
+        if (lastData && lastData.kind === 'posts' && curTid()) {
+            add({ tid: curTid(), title: lastData.title, fid: pageFid() });
+        }
+        return out;
+    }
+
     function extract() {
         let data;
         if (document.querySelector('#m_posts')) data = extractPosts();
         else if (document.querySelector('#m_threads')) data = extractTopics();
         else data = { kind: 'idle' };
         if (data) data.pager = extractPager();
+        if (data && data.kind === 'posts' && curTid()) {
+            rememberRecent({ tid: curTid(), fid: pageFid(), title: data.title });
+        }
         return data;
     }
 
@@ -1215,13 +1666,26 @@
         return { order, key, author, sort, filter };
     }
 
+    function clearToggleLeak() {
+        if (!inputEl) return;
+        const key = (store.toggleKey || '`').split('+').pop();
+        const v = inputEl.value || typed || '';
+        if (v && (v === key || v === '`')) {
+            typed = '';
+            inputEl.value = '';
+            renderApp();
+        }
+    }
+
     function focusPrompt() {
+        const delay = suppressToggleChar ? 80 : 0;
         setTimeout(() => {
             if (!store.on || covered || !inputEl) return;
             const active = document.activeElement;
             if (active && active !== inputEl && root && !root.contains(active) && active.blur) active.blur();
             inputEl.focus();
-        }, 0);
+            clearToggleLeak();
+        }, delay);
     }
 
     function focusInput(preset) {
@@ -1268,18 +1732,47 @@
         location.href = topic.href;
     }
 
+    function commandPrefix(v) {
+        const raw = String(v || '');
+        const slash = raw.startsWith('/');
+        return { slash, rest: slash ? raw.slice(1) : raw, raw };
+    }
+
+    function slashHits(v) {
+        const { rest } = commandPrefix(v);
+        const q = rest.toLowerCase();
+        return CMDS.filter(c => ('/' + c).startsWith('/' + q) || c.startsWith(q));
+    }
+
+    function applyCompletion(cmd, slash) {
+        const next = (slash ? '/' : '') + cmd + (NEEDS_ARG.has(cmd) ? ' ' : '');
+        typed = next;
+        slashIndex = 0;
+        renderApp();
+        if (inputEl) {
+            inputEl.value = next;
+            try { inputEl.setSelectionRange(next.length, next.length); } catch (err) { /* ignore */ }
+            inputEl.focus();
+        }
+        return next;
+    }
+
     function tabComplete(v) {
-        const hits = CMDS.filter(c => c.startsWith(String(v || '').toLowerCase()));
+        const { slash, rest } = commandPrefix(v);
+        const hits = slashHits(v);
         if (hits.length === 1) {
-            typed = hits[0] + (NEEDS_ARG.has(hits[0]) ? ' ' : '');
-            renderApp();
+            applyCompletion(hits[0], slash);
         } else if (hits.length > 1) {
             let p = hits[0];
             for (const c of hits) while (!c.startsWith(p)) p = p.slice(0, -1);
-            if (p.length > v.length) {
-                typed = p;
+            if (p.length > rest.length) {
+                typed = (slash ? '/' : '') + p;
                 renderApp();
-            } else finish(v, [line(esc(hits.join('  ')), 'cad-faint')]);
+                if (inputEl) {
+                    inputEl.value = typed;
+                    try { inputEl.setSelectionRange(typed.length, typed.length); } catch (err) { /* ignore */ }
+                }
+            } else finish(v, [line(esc(hits.map(c => (slash ? '/' : '') + c).join('  ')), 'cad-faint')]);
         }
     }
 
@@ -2276,6 +2769,8 @@
         covered = false;
         store.on = !store.on;
         if (store.on) {
+            suppressToggleChar = true;
+            openedAt = Date.now();
             const active = document.activeElement;
             if (active && active.blur && (!root || !root.contains(active))) active.blur();
             build();
@@ -2283,6 +2778,12 @@
             setFavicon(true);
             refresh(true);
             focusPrompt();
+            const done = () => {
+                clearToggleLeak();
+                suppressToggleChar = false;
+            };
+            document.addEventListener('keyup', done, { once: true, capture: true });
+            setTimeout(done, 200);
         } else {
             setFavicon(false);
             applyAttrs();
@@ -2330,6 +2831,11 @@
         e.stopPropagation();
         if (isImeArtifact(e)) return;
         const el = e.currentTarget;
+        if (suppressToggleChar && isToggleEvent(e)) {
+            e.preventDefault();
+            clearToggleLeak();
+            return;
+        }
         if (e.ctrlKey && (e.key === '[' || e.code === 'BracketLeft')) {
             e.preventDefault();
             el.blur();
@@ -2342,22 +2848,54 @@
             return;
         }
         if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const hits = typed.trim().startsWith('/') ? slashHits(typed) : [];
+        if (hits.length && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+            e.preventDefault();
+            if (e.key === 'ArrowDown') slashIndex = (slashIndex + 1) % hits.length;
+            else slashIndex = (slashIndex - 1 + hits.length) % hits.length;
+            renderApp();
+            return;
+        }
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
+            if (hits.length) {
+                const cmd = hits[Math.max(0, Math.min(slashIndex, hits.length - 1))];
+                const { slash } = commandPrefix(typed);
+                const next = applyCompletion(cmd, slash);
+                if (!NEEDS_ARG.has(cmd)) {
+                    typed = '';
+                    histIdx = -1;
+                    slashIndex = 0;
+                    renderApp();
+                    runCmd(next);
+                }
+                return;
+            }
             const v = el.value;
             typed = '';
             histIdx = -1;
+            slashIndex = 0;
             renderApp();
             runCmd(v);
             return;
         }
         if (e.key === 'Tab') {
             e.preventDefault();
-            if (el.value) tabComplete(el.value);
+            if (hits.length) {
+                const { slash } = commandPrefix(typed);
+                applyCompletion(hits[Math.max(0, Math.min(slashIndex, hits.length - 1))], slash);
+            } else if (el.value) tabComplete(el.value);
             return;
         }
         if (e.key === 'Escape') {
             e.preventDefault();
+            if (hits.length && typed.trim().startsWith('/')) {
+                typed = '';
+                slashIndex = 0;
+                if (inputEl) inputEl.value = '';
+                renderApp();
+                return;
+            }
             if (pendingReply && !pendingReply.sending) pendingReply = null;
             panel = null;
             toggleCover();
@@ -2737,12 +3275,30 @@
         const placeholder = pendingReply && pendingReply.phase === 'confirm'
             ? 'y sends, n cancels'
             : 'Message or /command';
-        const slash = typed.trim().startsWith('/') ? CMDS.filter(c => ('/' + c).startsWith(typed.trim().toLowerCase()) || c.startsWith(typed.trim().slice(1).toLowerCase())).slice(0, 8) : [];
+        const slash = typed.trim().startsWith('/') ? slashHits(typed).slice(0, 10) : [];
+        if (slashIndex >= slash.length) slashIndex = Math.max(0, slash.length - 1);
         return html`<div class="cad-inputbar" onClick=${() => { if (inputEl) inputEl.focus(); }}>
-            ${slash.length ? html`<div class="cad-slash">${slash.map(c => html`<button type="button" class="cad-action cad-hint" onClick=${() => focusInput('/' + c + ' ')}>${'/' + c}</button>`)}</div>` : null}
+            ${slash.length ? html`<div class="cad-slash" role="listbox" aria-label="Commands">${slash.map((c, i) => html`<button type="button" role="option" aria-selected=${i === slashIndex} class=${'cad-slash-item' + (i === slashIndex ? ' cad-slash-on' : '')} onMouseDown=${e => { e.preventDefault(); applyCompletion(c, true); }}><span class="cad-slash-cmd">${'/' + c}</span>${NEEDS_ARG.has(c) ? html`<span class="cad-slash-hint">arg</span>` : null}</button>`)}</div>` : null}
             <textarea class="cad-real" rows="2" aria-label="Message" placeholder=${placeholder} ref=${el => { inputEl = el; }} value=${typed}
                 spellcheck="false" autocomplete="off" autocapitalize="off"
-                onInput=${e => { typed = e.currentTarget.value; }}
+                onInput=${e => {
+                    if (suppressToggleChar) {
+                        const key = (store.toggleKey || '`').split('+').pop();
+                        e.currentTarget.value = e.currentTarget.value.split(key).join('').replace(/`/g, '');
+                    }
+                    const prev = typed;
+                    typed = e.currentTarget.value;
+                    const slashNow = typed.trim().startsWith('/');
+                    const slashPrev = String(prev || '').trim().startsWith('/');
+                    if (slashNow && !slashPrev) slashIndex = 0;
+                    if (slashNow || slashPrev) {
+                        const s = e.currentTarget.selectionStart, e2 = e.currentTarget.selectionEnd;
+                        renderApp();
+                        if (inputEl) {
+                            try { inputEl.setSelectionRange(s, e2); inputEl.focus(); } catch (err) { /* ignore */ }
+                        }
+                    }
+                }}
                 onKeyDown=${onInputKey}
                 onCompositionEnd=${() => noteCompositionEnd()}
                 onFocus=${() => { focused = true; }}
@@ -2772,13 +3328,19 @@
         </div>`;
     };
 
-    const Sidebar = () => html`<aside class="cad-side">
-        <div class="cad-brand">${store.style === 'claude' ? 'Claude' : 'Codex'}</div>
-        <div class="cad-side-label">Projects</div>
-        ${boards.length ? boards.map(b => html`<a class=${String(b.fid) === String(pageFid()) ? 'cad-onitem' : ''} href=${'/thread.php?fid=' + encodeURIComponent(b.fid)}>${b.name}</a>`) : html`<button type="button" class="cad-sideitem" onClick=${() => runCmd('board add')}>Save this board</button>`}
-        <div class="cad-side-label">Sessions</div>
-        ${(savedThreads || []).slice(0, 12).map(t => html`<a href=${'/read.php?tid=' + encodeURIComponent(t.tid)}>${t.title}</a>`)}
-    </aside>`;
+    const Sidebar = () => {
+        const boardList = discoverPageBoards();
+        const threads = sidebarThreads();
+        const cur = String(pageFid() || '');
+        return html`<aside class="cad-side">
+            <div class="cad-brand">${store.style === 'claude' ? 'Claude' : 'Codex'}</div>
+            <div class="cad-side-label">Boards</div>
+            ${boardList.length ? boardList.map(b => html`<a class=${String(b.fid) === cur ? 'cad-onitem' : ''} href=${'/thread.php?fid=' + encodeURIComponent(b.fid)} title=${'fid ' + b.fid}>${b.name}</a>`) : html`<button type="button" class="cad-sideitem" onClick=${() => runCmd('board add')}>Save this board</button>`}
+            ${cur && !boardList.some(b => String(b.fid) === cur) ? html`<button type="button" class="cad-sideitem" onClick=${() => runCmd('board add')}>Save this board</button>` : null}
+            <div class="cad-side-label">Favorites</div>
+            ${threads.length ? threads.slice(0, 16).map(t => html`<a href=${t.href || ('/read.php?tid=' + encodeURIComponent(t.tid))} title=${t.title}>${t.title}</a>`) : html`<div class="cad-sideitem cad-dim">bookmark a thread, or open your favorites</div>`}
+        </aside>`;
+    };
 
     const TopBar = ({ data }) => {
         const ctx = viewBits();
@@ -2797,13 +3359,46 @@
         </div>`;
     };
 
+    const CoverScreen = () => html`<div class="cad-cover" role="dialog" aria-label="Code review">
+        <div class="cad-cover-bar">
+            <i></i><i></i><i></i>
+            <div class="cad-cover-bar-title">src/server.ts — api-server — Review</div>
+        </div>
+        <div class="cad-cover-work">
+            <nav class="cad-cover-tree" aria-label="Files">
+                <div class="cad-cover-dir">src</div>
+                <div class="cad-cover-file cad-onitem">server.ts</div>
+                <div class="cad-cover-file">handleRequest.ts</div>
+                <div class="cad-cover-file">errors.ts</div>
+                <div class="cad-cover-dir">test</div>
+                <div class="cad-cover-file">handleRequest.test.ts</div>
+            </nav>
+            <div class="cad-cover-editor">
+                <div class="cad-cover-tabs">
+                    <div class="cad-cover-tab cad-onitem">server.ts</div>
+                    <div class="cad-cover-tab">handleRequest.test.ts</div>
+                </div>
+                <div class="cad-cover-diff">
+                    ${COVER_DIFF.map(row => row.kind === 'hunk'
+                        ? html`<div class="cad-cover-hunk">${row.text}</div>`
+                        : html`<div class=${'cad-dline' + (row.kind === 'del' ? ' cad-del' : row.kind === 'add' ? ' cad-add' : '')}>
+                            <span>${row.oldN || ''}</span><span>${row.newN || ''}</span><span>${(row.kind === 'del' ? '- ' : row.kind === 'add' ? '+ ' : '  ') + row.text}</span>
+                        </div>`)}
+                    <pre class="cad-cover-code" style="position:absolute;left:-9999px;top:auto">${COVER_TEXT}</pre>
+                </div>
+                <div class="cad-cover-foot">src/server.ts · Ln 43, Col 12 · TypeScript · UTF-8 · LF</div>
+            </div>
+        </div>
+    </div>`;
+
     const App = () => {
         const data = lastData || { kind: 'idle' };
-        return html`<div class="cad-app">
+        return html`<div style="flex:1;min-height:0;display:flex;flex-direction:column;position:relative">
+            ${covered ? html`<${CoverScreen} />` : null}
+            <div class="cad-app">
             <${Sidebar} />
             <div class="cad-main">
                 <${TopBar} data=${data} />
-                ${covered ? html`<div class="cad-cover"><div class="cad-brand">${store.style === 'claude' ? 'Claude' : 'Codex'}</div><pre class="cad-cover-code">${COVER_TEXT}</pre></div>` : null}
                 <div class="cad-body" id="cad__body" ref=${el => { bodyEl = el; }} onScroll=${onBodyScroll}>
                     <div class="cad-measure">
                         <${ReplyDock} />
@@ -2815,6 +3410,7 @@
                 <${InputBar} />
                 <${StatusBar} />
             </div>
+        </div>
         </div>`;
     };
 
@@ -2901,8 +3497,21 @@
             buildVotePayload,
             buildBookmarkPayload,
             buildThreadPayload,
+            tabComplete,
+            slashHits,
+            applyCompletion,
+            tidyName,
+            postBoxes,
+            parseQuoteNode,
+            parseTopicArgs,
+            parseUserInfoMap,
+            discoverPageBoards,
+            sidebarThreads,
+            isUidLabel,
             getPanel: () => panel,
             getPending: () => pendingReply,
+            getTyped: () => typed,
+            setTyped: v => { typed = v; },
         };
     }
 })();
