@@ -1,5 +1,22 @@
 # Changelog
 
+## 4.1.1
+
+Fixes from a logged-in live test of 4.1.0. Parsing follows NGA's own `commonui.postArg`, attachment lists, and user-info data.
+
+### Fixed
+
+- Quote and vote cards no longer show `pid 0` on later pages. Reply pids come from `commonui.postArg.proc`, which survives NGA's hydration. A non-zero DOM pid is preferred over a parent form's `pid=0`. The original post is genuinely pid 0 and stays that way.
+- Author names that the dump stores as `UID:…` are resolved from `commonui.userInfo` (including hex-encoded `uuname`), from a later hydrated `a.author` / `#postauthorN`, and, if those are still empty, from a read-only same-origin GET to NGA's ucp endpoint (`nuke.php?__act=get&__lib=ucp`). Names are cached; at most one GET is sent per uid; nothing is POSTed.
+- With `img on`, floors that only showed leftover numerals ("3", "4") now show thumbnails. Sources are `data-srclazy` / `data-srcorg`, `[img]` BBCode (including `./mon_…` paths), and `ubbcode.attach.load`. Relative paths get the `https://img.nga.cn/attachments/` prefix.
+- `op` on a page that has no original-poster posts uses `postArg.setDefault`'s topic-author uid (`tAid`) and fetches NGA's `authorid` view. The status counts visible OP posts only. It no longer shows an empty list, "End of pages", and a thread-wide count.
+- The sidebar's Favorites list comes from a cached, read-only GET of `thread.php?favor=1`. Recent threads are labeled Recent, and are not mixed into Favorites.
+- A quote shows the original time when that time is in the markup or in `postArg` on the same page. The main column is 110ch on wide screens (was 92ch).
+
+### Added
+
+- Tests for postArg pids after a hydrated DOM, ucp name fetching, lazy and BBCode images, `op` on page 2, and the Favorites / Recent split.
+
 ## 4.1.0
 
 Parsing follows the live NGA DOM. The overlay was tested against saved logged-in pages, and the boss-key cover, slash menu, and sidebar are the ones those pages need.

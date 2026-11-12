@@ -81,4 +81,4 @@ npm test          # jsdom：disguise.test.js、fixes.test.js、dumps.test.js（�
 npm run shots     # 用 Playwright 对 dumps 截图，写到 /workspace/nga-dev-shots
 ```
 
-`npm test` 使用 jsdom 和 `tests/fixtures/`，不访问 NGA。4.1.0 修了真实页面上的解析（重复楼层、引用头、搜索占位行、回帖数、版名空格、只看某作者时的楼层号）和桌面外壳（侧栏、斜杠菜单、整屏 Esc 遮罩）。详见 [CHANGELOG.md](CHANGELOG.md)。收藏、投票、发新帖和通知没有在正式站上验证过。
+`npm test` 使用 jsdom 和 `tests/fixtures/`，不访问 NGA。4.1.1 修了正式站上仍失败的几项：水合后的真实 pid、作者名（`uuname` / 只读 ucp GET）、`data-srclazy` 与 `[img]` 缩略图、非首页的 `op`、真正的收藏与最近浏览、引用时间和稍宽的主栏。详见 [CHANGELOG.md](CHANGELOG.md)。收藏、投票、发新帖和通知没有在正式站上验证过。

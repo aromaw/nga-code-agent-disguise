@@ -181,12 +181,14 @@ async function main() {
             await shot(page, 'thread-p2-quotes');
             await page.close();
         }
-        // 3. Image thread, img on
+        // 3. Image thread, img on — floor 8 has many lazy thumbs (was only "1")
         {
             const page = await openPage(browser, origin, 'images', { cad_img: true }, async (p) => {
                 await p.evaluate(() => {
-                    const img = document.querySelector('#cad-floor-0 img.cad-img, .cad-img');
-                    if (img) img.scrollIntoView({ block: 'center' });
+                    const el = document.getElementById('cad-floor-8')
+                        || document.getElementById('cad-floor-4')
+                        || document.querySelector('.cad-img');
+                    if (el) el.scrollIntoView({ block: 'start' });
                 });
                 await p.waitForTimeout(300);
             });
@@ -266,8 +268,18 @@ async function main() {
         }
         // bonus: fav sidebar, search, fixture board (useful for visual QA)
         {
-            const page = await openPage(browser, origin, 'fav', {});
+            const page = await openPage(browser, origin, 'fav', {
+                cad_recent: [{ tid: '111111', title: 'A recent thread', href: '/read.php?tid=111111' }],
+            });
             await shot(page, 'favorites');
+            await page.close();
+        }
+        {
+            const page = await openPage(browser, origin, 'threadP2', {}, async (p) => {
+                await p.evaluate(async () => { await window.__cad.runCmd('op'); });
+                await p.waitForTimeout(250);
+            });
+            await shot(page, 'op-mode-p2');
             await page.close();
         }
         {

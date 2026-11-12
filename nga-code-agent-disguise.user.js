@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NGA Code Agent Disguise
 // @namespace    https://github.com/aromaw/nga-code-agent-disguise
-// @version      4.1.0
+// @version      4.1.1
 // @description  Disguise NGA forum pages as a Claude Code / Codex CLI session. Backtick toggles outside text fields, /help lists commands, and reply/quote post through the site's own form after a confirm step.
 // @author       aromaw
 // @match        *://bbs.nga.cn/*
@@ -20,7 +20,7 @@
     'use strict';
 
     const TEST = typeof globalThis !== 'undefined' && !!globalThis.__CAD_TEST;
-    const VERSION = '4.1.0';
+    const VERSION = '4.1.1';
     const POST_PREVIEW_LINES = 14;
 
     /* ================= settings ================= */
@@ -162,7 +162,7 @@
     .cad-welcome .dim { color:var(--dim); }
 
     .cad-body { flex:1; overflow-y:auto; padding:4px 0 20px; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
-    .cad-measure { max-width:92ch; margin:0 auto; padding:12px 28px 8px; }
+    .cad-measure { max-width:110ch; margin:0 auto; padding:12px 28px 8px; }
     #cad__root ::selection { background:var(--accent); color:var(--bg); }
     .cad-trow { margin:0 -22px; padding:3px 22px; font-variant-numeric:tabular-nums; display:grid; grid-template-columns:38px 62px minmax(0,1fr); column-gap:0; }
     .cad-trow:hover { background:var(--band); }
@@ -205,7 +205,7 @@
     .cad-blocktag { display:inline-block; padding:0 8px; border-radius:4px; font-weight:700; background:var(--accent); color:var(--bg); font-size:12px; margin:6px 0 2px; }
     .cad-banner { border:1px solid var(--border); border-radius:8px; padding:8px 14px; color:var(--dim); margin-bottom:12px; font-size:12.5px; }
     .cad-banner b { color:var(--text); }
-    .cad-hints { flex-shrink:0; display:flex; flex-wrap:wrap; gap:6px; align-items:center; width:100%; box-sizing:border-box; padding:10px max(28px, calc((100% - 92ch) / 2)); background:var(--bg); border-top:1px solid var(--border); position:relative; z-index:3; }
+    .cad-hints { flex-shrink:0; display:flex; flex-wrap:wrap; gap:6px; align-items:center; width:100%; box-sizing:border-box; padding:10px max(28px, calc((100% - 110ch) / 2)); background:var(--bg); border-top:1px solid var(--border); position:relative; z-index:3; }
     .cad-hint { border:1px solid var(--border); border-radius:999px; padding:2px 8px; color:var(--dim); background:transparent; }
     .cad-hint:hover { border-color:var(--accent); color:var(--accent2); }
     .cad-inputbar {
@@ -214,7 +214,7 @@
         background:var(--bg);
         display:flex; align-items:center; gap:8px; color:var(--text);
         width:100%; box-sizing:border-box;
-        padding:10px max(28px, calc((100% - 92ch) / 2));
+        padding:10px max(28px, calc((100% - 110ch) / 2));
     }
     .cad-inputbar > .cad-faint { max-width:35%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .cad-inputbar .prompt { color:var(--text); font-weight:700; }
@@ -249,7 +249,7 @@
     .cad-statusline { margin-top:14px; padding:8px 12px; border:1px solid var(--border); border-radius:8px; }
     .cad-statusline.cad-error { border-color:var(--accent); }
     .cad-qhead { color:var(--text); font-weight:650; font-size:13.5px; margin-bottom:4px; }
-    .cad-slash { position:absolute; left: max(28px, calc((100% - 92ch) / 2)); right: max(28px, calc((100% - 92ch) / 2)); bottom: calc(100% + 6px); z-index: 6; background:var(--bg-input); color:var(--text); border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,.35); padding:6px; max-height:min(320px, 50vh); overflow-y:auto; overflow-x:hidden; }
+    .cad-slash { position:absolute; left: max(28px, calc((100% - 110ch) / 2)); right: max(28px, calc((100% - 110ch) / 2)); bottom: calc(100% + 6px); z-index: 6; background:var(--bg-input); color:var(--text); border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,.35); padding:6px; max-height:min(320px, 50vh); overflow-y:auto; overflow-x:hidden; }
     .cad-slash button, .cad-slash-item { display:flex; align-items:center; justify-content:space-between; width:100%; text-align:left; border:0; background:transparent; color:var(--text); border-radius:8px; padding:8px 12px; font-size:14px; cursor:pointer; }
     .cad-slash button:hover, .cad-slash-item:hover, .cad-slash-item.cad-slash-on, .cad-slash .cad-slash-on { background:var(--band); color:var(--text); }
     .cad-slash-cmd { font-weight:650; }
@@ -409,6 +409,9 @@
     let boards = GM_getValue('cad_boards', []);
     let savedThreads = GM_getValue('cad_threads', []);
     const locCache = GM_getValue('cad_loc_cache', {});
+    const nameCache = GM_getValue('cad_name_cache', {});
+    let favorCache = GM_getValue('cad_fav_cache', { at: 0, topics: [] });
+    let favorPending = false;
     let realTitle = '';
     let origIcon = null;
     let lastHref = '';
@@ -575,13 +578,31 @@
         return /smile|emoji/i.test((img.getAttribute('src') || '') + ' ' + (img.className || ''));
     }
 
+    function absImg(u) {
+        let raw = String(u || '').trim();
+        if (!raw) return '';
+        if (/^(?:about:blank|data:image\/gif)|loading|spacer|placeholder/i.test(raw) && !/\.(jpe?g|png|gif|webp|bmp)/i.test(raw)) return '';
+        if (/^(?:about:blank)$/i.test(raw)) return '';
+        raw = raw.replace(/^\.\//, '');
+        if (/^https?:\/\//i.test(raw)) return raw;
+        if (raw.startsWith('//')) return (location.protocol || 'https:') + raw;
+        if (/^(?:mon_|attachments\/|\d{4}\/)/i.test(raw) || (/\.(jpe?g|png|gif|webp|bmp)(\?|$)/i.test(raw) && !raw.startsWith('/') && raw.indexOf('://') < 0)) {
+            return 'https://img.nga.cn/attachments/' + raw.replace(/^\/+/, '');
+        }
+        try { return new URL(raw, (location.href || 'https://bbs.nga.cn/')).href; } catch (err) { return raw; }
+    }
+
     function imgSrc(img) {
-        const raw = img.getAttribute('data-src') || img.getAttribute('data-lazy-src')
-            || img.getAttribute('data-original') || img.getAttribute('src') || '';
-        const abs = u => { try { return new URL(u, location.href).href; } catch (err) { return ''; } };
-        const main = raw && !/loading|blank|spacer|placeholder/i.test(raw) ? abs(raw) : '';
+        if (!img || !img.getAttribute) return { main: '', alt: '' };
+        const attrs = ['data-srclazy', 'data-srcorg', 'data-apporg', 'data-original', 'data-src', 'data-lazy-src', 'data-src-lazy', 'src'];
+        let main = '';
+        for (const a of attrs) {
+            const v = absImg(img.getAttribute(a));
+            if (v && !/about:blank/i.test(v)) { main = v; break; }
+        }
         const link = img.closest && img.closest('a');
-        const alt = link && /\.(jpe?g|png|gif|webp)/i.test(link.href) ? abs(link.href) : '';
+        const href = link && (link.getAttribute('href') || link.href) || '';
+        const alt = /\.(jpe?g|png|gif|webp|bmp)/i.test(href) ? absImg(href) : '';
         return { main: main || alt, alt: alt && alt !== main ? alt : '' };
     }
 
@@ -639,7 +660,17 @@
             i.replaceWith('%%IMG' + (imgs.length - 1) + '%%');
         });
         clone.querySelectorAll('script,style,button,.recommendvalue,.ogoodbtn,.postBtnPos,.postinfo,.single_ttip2,.postbtnsc,.right_').forEach(i => i.remove());
-        return { text: cleanText(stripQuoteHeader(plainText(clone))), imgs };
+        let raw = plainText(clone);
+        raw = raw.replace(/\[img\]\s*([^\[\]]+?)\s*\[\/img\]/gi, (_, u) => {
+            const url = absImg(String(u).trim());
+            if (!url) return '';
+            if (imgs.some(o => o.main === url)) {
+                return '%%IMG' + imgs.findIndex(o => o.main === url) + '%%';
+            }
+            imgs.push({ main: url, alt: '' });
+            return '%%IMG' + (imgs.length - 1) + '%%';
+        });
+        return { text: cleanText(stripQuoteHeader(raw)), imgs };
     }
 
     function cleanTitle(t) {
@@ -775,6 +806,150 @@
         return out;
     }
 
+    function extractJsCallArgs(src, fn) {
+        const out = [];
+        const needle = fn;
+        let idx = 0;
+        while ((idx = src.indexOf(needle, idx)) >= 0) {
+            const rest = src.slice(idx + needle.length);
+            const wm = rest.match(/^\s*\(/);
+            // Only real calls: "(" must follow the name, not ".forEach(" in this script.
+            if (!wm) { idx += needle.length; continue; }
+            const open = idx + needle.length + wm[0].length - 1;
+            let depth = 1, inStr = false, quote = '', esc = false, end = open + 1;
+            for (let i = open + 1; i < src.length; i++) {
+                const c = src[i];
+                if (inStr) {
+                    if (esc) esc = false;
+                    else if (c === '\\') esc = true;
+                    else if (c === quote) inStr = false;
+                } else if (c === '"' || c === "'") { inStr = true; quote = c; }
+                else if (c === '(' || c === '[' || c === '{') depth++;
+                else if (c === ')' || c === ']' || c === '}') {
+                    depth--;
+                    if (depth === 0) { end = i; break; }
+                }
+            }
+            out.push(splitJsArgs(src.slice(open + 1, end)));
+            idx = end + 1;
+        }
+        return out;
+    }
+
+    function parsePostArgs(doc) {
+        doc = doc || document;
+        const byFloor = Object.create(null);
+        let topicAuthor = '';
+        let topicTid = '';
+        let topicReplies = '';
+        for (const src of scriptTexts(doc)) {
+            extractJsCallArgs(src, 'commonui.postArg.setDefault').forEach(args => {
+                // fid, stid, tid, tAid, ... tReplies at [11] or nearby
+                if (args.length < 4) return;
+                const tid = String(args[2] || '').replace(/\D+/g, '');
+                const aid = String(args[3] || '').replace(/\D+/g, '');
+                if (tid) topicTid = tid;
+                if (aid) topicAuthor = aid;
+                if (args.length > 11 && args[11] != null) {
+                    const n = parseInt(String(args[11]).replace(/[\D-]+/g, ''), 10);
+                    if (Number.isFinite(n) && n >= 0) topicReplies = String(n);
+                }
+            });
+            extractJsCallArgs(src, 'commonui.postArg.proc').forEach(args => {
+                // 0 i, 1-7 nodes, 8 fid, 9 tid, 10 pid, 11 type, 12 tAid, 13 pAid, 14 postTime, 15 recommend
+                const floor = parseInt(String(args[0] || '').trim(), 10);
+                if (!Number.isFinite(floor) || floor < 0 || floor > 999999 || args.length < 11) return;
+                const pid = String(args[10] == null ? '' : args[10]).replace(/\D+/g, '');
+                const uid = String(args[13] == null ? '' : args[13]).replace(/\D+/g, '');
+                const postTs = args[14];
+                byFloor[floor] = {
+                    floor,
+                    pid: pid === '' ? '' : pid,
+                    uid,
+                    postTime: formatUnix(postTs),
+                    postTs,
+                    recommend: args[15] || '',
+                    type: args[11] || '',
+                };
+            });
+        }
+        return { byFloor, topicAuthor, topicTid, topicReplies };
+    }
+
+    function decodeUuname(raw) {
+        const h = String(raw || '').trim();
+        if (!h || /[^0-9a-fA-F]/.test(h) || h.length < 2 || (h.length % 2)) return '';
+        try {
+            let out = '';
+            for (let i = 0; i < h.length; i += 2) out += '%' + h.slice(i, i + 2);
+            const name = decodeURIComponent(out);
+            return cleanAuthorName(name);
+        } catch (err) { return ''; }
+    }
+
+    function parseAttachLoads(doc) {
+        doc = doc || document;
+        const byFloor = Object.create(null);
+        for (const src of scriptTexts(doc)) {
+            extractJsCallArgs(src, 'ubbcode.attach.load').forEach(args => {
+                // postattachN, postcontentN, [ {url, type, ...}, ... ], pid, tid, uid, time, floor
+                const floorRaw = String(args[7] != null ? args[7] : args[0] || '');
+                const floorM = floorRaw.match(/(\d+)\s*$/);
+                const contentId = String(args[1] || '');
+                const floor = (contentId.match(/postcontent(\d+)/) || floorM || [])[1];
+                if (floor == null) return;
+                const list = [];
+                const blob = args[2] || '';
+                const re = /url\s*:\s*'([^']+)'|url\s*:\s*"([^"]+)"/g;
+                let m;
+                const rawList = String(blob);
+                while ((m = re.exec(rawList))) {
+                    const url = absImg(m[1] || m[2]);
+                    if (url) list.push({ main: url, alt: '' });
+                }
+                if (list.length) byFloor[String(floor)] = list;
+            });
+        }
+        return byFloor;
+    }
+
+    function ingestLiveUserInfo() {
+        try {
+            const users = (typeof commonui !== 'undefined' && commonui.userInfo && commonui.userInfo.users) || null;
+            if (!users) return;
+            Object.keys(users).forEach(k => {
+                const u = users[k];
+                if (!u) return;
+                const decoded = decodeUuname(u.uuname);
+                const name = (decoded && !isUidLabel(decoded) ? decoded : '') || (u.username || u.nickname || u.name);
+                const uid = u.uid || k;
+                if (uid && name && !isUidLabel(name)) {
+                    userNameMap[String(uid)] = cleanAuthorName(name);
+                    nameCache[String(uid)] = userNameMap[String(uid)];
+                }
+            });
+        } catch (err) { /* live object may be missing in tests */ }
+    }
+
+    function ingestHydratedAuthors(doc) {
+        doc = doc || document;
+        let added = false;
+        doc.querySelectorAll('a[id^="postauthor"], a.author, a.userlink, td.c1 a[href*="uid="], a[name="uid"]').forEach(a => {
+            const href = a.getAttribute('href') || '';
+            const uid = (href.match(/uid=(\d+)/) || [])[1] || '';
+            const name = cleanAuthorName(a.textContent);
+            if (uid && name && !isUidLabel(name) && userNameMap[uid] !== name) {
+                userNameMap[uid] = name;
+                nameCache[uid] = name;
+                added = true;
+            }
+        });
+        if (added) {
+            try { GM_setValue('cad_name_cache', nameCache); } catch (err) { /* ignore */ }
+        }
+        return added;
+    }
+
     function parseUserInfoMap(doc) {
         doc = doc || document;
         const map = Object.create(null);
@@ -817,7 +992,10 @@
                 if (!data || typeof data !== 'object') continue;
                 Object.keys(data).forEach(k => {
                     const u = data[k];
-                    if (u && typeof u === 'object') take(u.uid || k, u.username || u.nickname || u.name);
+                    if (u && typeof u === 'object') {
+                        const decoded = decodeUuname(u.uuname);
+                        take(u.uid || k, decoded || u.username || u.nickname || u.name);
+                    }
                 });
             }
             const ucp = src.match(/__UCPUSER\s*=\s*(\{[\s\S]*?\})\s*;/);
@@ -920,17 +1098,30 @@
         return (((uidLink && uidLink.getAttribute('href')) || '').match(/uid=(\d+)/) || [])[1] || '';
     }
 
+    function pickPid(candidates) {
+        const all = [];
+        for (const raw of candidates) {
+            const m = String(raw || '').match(/pid\s*[=:]?\s*(\d+)/i) || String(raw || '').match(/pid(\d+)/i);
+            if (m) all.push(m[1]);
+        }
+        const nonzero = all.filter(p => p !== '0');
+        // Prefer a real reply pid. The original post of a thread is genuinely pid 0.
+        return (nonzero[0] || all[0] || '');
+    }
+
     function pidFromNode(node) {
         if (!node || !node.querySelectorAll) return '';
-        const ids = [...node.querySelectorAll('[id*="pid" i], [name*="pid" i]')].map(el => (el.id || el.getAttribute('name') || '')).join(' ');
-        const idMatch = ids.match(/pid(\d+)/i);
-        if (idMatch) return idMatch[1];
-        const hrefs = [...node.querySelectorAll('a[href*="pid="]')].map(a => a.getAttribute('href') || '').join(' ');
-        const hrefMatch = hrefs.match(/[?&#]pid=(\d+)/i);
-        if (hrefMatch) return hrefMatch[1];
-        const oc = [...node.querySelectorAll('[onclick]')].map(el => el.getAttribute('onclick') || '').join(' ');
-        const click = oc.match(/quote\(\s*(\d+)\s*\)|pid[=:]\s*(\d+)/i);
-        return (click && (click[1] || click[2])) || '';
+        const idCands = [...node.querySelectorAll('[id*="pid" i], [name*="pid" i], a[id^="pid"]')]
+            .map(el => el.id || el.getAttribute('name') || '');
+        const fromId = pickPid(idCands);
+        if (fromId && fromId !== '0') return fromId;
+        const hrefs = [...node.querySelectorAll('a[href*="pid="], a[href*="topid="]')].map(a => a.getAttribute('href') || '');
+        const fromHref = pickPid(hrefs);
+        if (fromHref && fromHref !== '0') return fromHref;
+        const oc = [...node.querySelectorAll('[onclick]')].map(el => el.getAttribute('onclick') || '');
+        const fromClick = pickPid(oc);
+        if (fromClick && fromClick !== '0') return fromClick;
+        return fromId || fromHref || fromClick || '';
     }
 
     function postPid(b) {
@@ -1043,13 +1234,23 @@
         return { depth, text: cleanText(raw), author: name, time, uid, pid };
     }
 
-    function parsePost(b, i, opUid) {
+    function parsePost(b, i, opUid, postArgs, attachByFloor) {
         const content = b.querySelector('.postcontent, [id^="postcontent"]');
         const infoText = text(b.querySelector('[class*="postinfo" i], [id^="postInfo"], [id^="postdate"]')) || text(b.querySelector('.postBtnPos'));
         const dateEl = b.querySelector('[id^="postdate"], .postdatec, .postinfot');
         const dateM = (dateEl ? text(dateEl) : infoText).match(/\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?/);
-        const uid = postUid(b);
+        const floor = postFloor(b, i, infoText);
+        const arg = postArgs && postArgs.byFloor && postArgs.byFloor[floor];
+        let uid = postUid(b) || (arg && arg.uid) || '';
         let pid = postPid(b);
+        // postArg.proc is authoritative and survives NGA's later DOM rewrites.
+        if (arg && arg.pid !== undefined && arg.pid !== '') {
+            if (arg.pid !== '0' || floor === 0 || !pid || pid === '0') pid = String(arg.pid);
+        }
+        if (pid === '0' && floor !== 0) {
+            const again = postPid(b);
+            if (again && again !== '0') pid = again;
+        }
         const rawName = text(b.querySelector('.posterinfo .author, .posterInfoLine .author, a.author, [id^="postauthor"]'))
             || text(b.querySelector('[id^="postauthor"]')) || '';
         let name = resolveAuthorName(rawName, uid);
@@ -1063,17 +1264,27 @@
             : [];
         const inline = extractInlineReplyQuote(content);
         if (inline && !quotes.length) quotes.push(inline);
-        if (!pid) pid = (quotes.find(q => q.pid) || {}).pid || '';
-        const floor = postFloor(b, i, infoText);
+        if (postArgs && postArgs.byFloor) {
+            quotes.forEach(q => {
+                if (q.time) return;
+                const hit = Object.values(postArgs.byFloor).find(a => (q.pid && String(a.pid) === String(q.pid) && a.pid !== '0') || (q.uid && a.uid && String(a.uid) === String(q.uid)));
+                if (hit && hit.postTime) q.time = hit.postTime;
+            });
+        }
+        const date = (dateM && dateM[0]) || (arg && arg.postTime) || '';
         const head = [
             '#' + floor,
             name + (uid && uid !== name ? '(' + uid + ')' : ''),
-            dateM && dateM[0],
+            date,
             likes !== '' ? formatScore(likes) : '',
         ].filter(Boolean).join(' · ');
         const body = contentText(content);
+        const imgs = (body.imgs || []).slice();
+        const seen = new Set(imgs.map(o => o.main));
+        const extras = (attachByFloor && (attachByFloor[String(floor)] || attachByFloor[floor])) || [];
+        extras.forEach(o => { if (o.main && !seen.has(o.main)) { seen.add(o.main); imgs.push(o); } });
         const id = 'floor:' + floor + ':' + uid + ':' + (pid || i);
-        return { id, floor, pid, head, uid, name, isOP, date: dateM && dateM[0] || '', likes, text: body.text, imgs: body.imgs, quotes };
+        return { id, floor, pid, head, uid, name, isOP, date, likes, text: body.text, imgs, quotes };
     }
 
     function findHotBoxes(doc) {
@@ -1120,6 +1331,11 @@
     function extractPosts(doc, opUidOverride) {
         doc = doc || document;
         userNameMap = Object.assign(Object.create(null), parseUserInfoMap(doc), userNameMap);
+        Object.keys(nameCache).forEach(k => { if (nameCache[k] && !isUidLabel(nameCache[k])) userNameMap[k] = nameCache[k]; });
+        ingestLiveUserInfo();
+        ingestHydratedAuthors(doc);
+        const postArgs = parsePostArgs(doc);
+        const attachByFloor = parseAttachLoads(doc);
         const allBoxes = postBoxes(doc);
         if (!allBoxes.length) return null;
         const elTitle = text(doc.querySelector('#toppedtopic .topic, .catetitle, h1 .topic, #postsubject0, [id^="postsubject"]'));
@@ -1131,13 +1347,15 @@
         let authorFiltered = false;
         try { authorFiltered = new URL(location.href).searchParams.has('authorid'); } catch (err) { authorFiltered = false; }
         const opUid = opUidOverride !== undefined ? opUidOverride
-            : (authorFiltered ? '' : ((opUidTid === curTid() && opUidSticky) || (markedOP ? postUid(markedOP) : curPageNo() <= 1 ? postUid(boxes[0]) : '')));
-        const posts = boxes.map((b, i) => parsePost(b, i, opUid));
+            : (authorFiltered ? '' : ((opUidTid === curTid() && opUidSticky) || (postArgs && postArgs.topicAuthor) || (markedOP ? postUid(markedOP) : curPageNo() <= 1 ? postUid(boxes[0]) : '')));
+        if (opUid && !opUidSticky && opUidTid === curTid()) opUidSticky = opUid;
+        if (opUid && curTid() && !opUidTid) { opUidTid = curTid(); opUidSticky = opUidSticky || opUid; }
+        const posts = boxes.map((b, i) => parsePost(b, i, opUid, postArgs, attachByFloor));
         if (opUidOverride === undefined && posts.length && title && posts[0].text.startsWith(title)) {
             posts[0].text = cleanText(posts[0].text.slice(title.length));
         }
         const hot = doc === document
-            ? hotBoxes.slice(0, 5).map((b, i) => parsePost(b, i, opUid)).filter(p => p.text || p.imgs.length)
+            ? hotBoxes.slice(0, 5).map((b, i) => parsePost(b, i, opUid, postArgs, attachByFloor)).filter(p => p.text || p.imgs.length)
             : [];
         return { kind: 'posts', title, posts, hot };
     }
@@ -1209,29 +1427,66 @@
         GM_setValue('cad_recent', recent);
     }
 
-    function sidebarThreads() {
-        const out = [];
-        const seen = new Set();
-        const add = t => {
-            const tid = String(t && t.tid || ((t && t.href) || '').match(/tid=(\d+)/) && ((t.href || '').match(/tid=(\d+)/) || [])[1] || '');
-            if (!tid || seen.has(tid)) return;
-            const title = tidyName(t.title) || ('tid ' + tid);
-            if (isJunkTopicTitle(title)) return;
-            seen.add(tid);
-            const href = t.href || ('/read.php?tid=' + encodeURIComponent(tid));
-            out.push({ tid, title, href, fid: t.fid || '' });
-        };
-        (savedThreads || []).forEach(add);
-        const recent = GM_getValue('cad_recent', []);
-        if (Array.isArray(recent)) recent.forEach(add);
-        if (document.querySelector('#m_threads') && /favor=/.test(location.search || location.href)) {
-            const data = extractTopics();
-            if (data && data.topics) data.topics.forEach(add);
-        }
-        if (lastData && lastData.kind === 'posts' && curTid()) {
-            add({ tid: curTid(), title: lastData.title, fid: pageFid() });
-        }
+    function threadEntry(t) {
+        const tid = String(t && t.tid || ((t && t.href) || '').match(/tid=(\d+)/) && ((t.href || '').match(/tid=(\d+)/) || [])[1] || '');
+        if (!tid) return null;
+        const title = tidyName(t.title) || ('tid ' + tid);
+        if (isJunkTopicTitle(title)) return null;
+        const href = t.href || ('/read.php?tid=' + encodeURIComponent(tid));
+        return { tid, title, href, fid: t.fid || '' };
+    }
+
+    function uniqueThreads(lists) {
+        const out = [], seen = new Set();
+        lists.forEach(list => (list || []).forEach(t => {
+            const e = threadEntry(t);
+            if (!e || seen.has(e.tid)) return;
+            seen.add(e.tid);
+            out.push(e);
+        }));
         return out;
+    }
+
+    function sidebarFavorites() {
+        const fromPage = (document.querySelector('#m_threads') && /favor=/.test(location.search || location.href))
+            ? ((extractTopics() || {}).topics || [])
+            : [];
+        const cached = (favorCache && Array.isArray(favorCache.topics)) ? favorCache.topics : [];
+        return uniqueThreads([savedThreads, fromPage, cached]);
+    }
+
+    function sidebarRecent() {
+        const recent = GM_getValue('cad_recent', []);
+        const current = (lastData && lastData.kind === 'posts' && curTid())
+            ? [{ tid: curTid(), title: lastData.title, fid: pageFid() }]
+            : [];
+        const favIds = new Set(sidebarFavorites().map(t => t.tid));
+        return uniqueThreads([recent, current]).filter(t => !favIds.has(t.tid));
+    }
+
+    function sidebarThreads() {
+        // Kept for tests and bookmark list: favorites first, then recent.
+        return uniqueThreads([sidebarFavorites(), sidebarRecent()]);
+    }
+
+    function ensureFavs() {
+        if (TEST) return;
+        const fresh = favorCache && favorCache.at && (Date.now() - favorCache.at < 5 * 60 * 1000) && Array.isArray(favorCache.topics);
+        if (fresh || favorPending) return;
+        favorPending = true;
+        const host = location.host || 'bbs.nga.cn';
+        fetch((location.protocol || 'https:') + '//' + host + '/thread.php?favor=1', { credentials: 'include', method: 'GET' })
+            .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+            .then(txt => {
+                const doc = new DOMParser().parseFromString(txt, 'text/html');
+                const data = extractTopics(doc, (location.origin || ('https://' + host)) + '/thread.php?favor=1');
+                const topics = ((data && data.topics) || []).map(t => ({ tid: t.tid, title: t.title, href: t.href, fid: t.fid || '' }));
+                favorCache = { at: Date.now(), topics };
+                GM_setValue('cad_fav_cache', favorCache);
+                if (store.on && !covered) renderApp();
+            })
+            .catch(() => {})
+            .finally(() => { favorPending = false; });
     }
 
     function extract() {
@@ -1247,33 +1502,105 @@
     }
 
     /* ================= locations ================= */
-    function fetchLoc(uid) {
-        if (locCache[uid]) return Promise.resolve(locCache[uid]);
-        return fetch('https://' + location.host + '/nuke.php?__output=11&__act=get&__lib=ucp&uid=' + uid, { credentials: 'include' })
+    function walkUcpName(obj, depth) {
+        if (!obj || depth > 4) return '';
+        if (typeof obj === 'string') {
+            const decoded = decodeUuname(obj);
+            const n = cleanAuthorName(decoded || obj);
+            return n && !isUidLabel(n) ? n : '';
+        }
+        if (typeof obj !== 'object') return '';
+        const direct = obj.uuname || obj.uuName || obj.username || obj.nickname || obj.name || obj.uname;
+        const fromDirect = walkUcpName(direct, depth + 1);
+        if (fromDirect) return fromDirect;
+        if (Array.isArray(obj)) {
+            for (const item of obj) {
+                const n = walkUcpName(item, depth + 1);
+                if (n) return n;
+            }
+        }
+        return '';
+    }
+
+    function nameFromUcpData(res) {
+        if (!res) return '';
+        const data = res.data !== undefined ? res.data : res;
+        return walkUcpName(data, 0);
+    }
+
+    function rememberName(uid, name) {
+        const id = String(uid || '');
+        const n = cleanAuthorName(name);
+        if (!id || !n || isUidLabel(n)) return false;
+        userNameMap[id] = n;
+        nameCache[id] = n;
+        const keys = Object.keys(nameCache);
+        if (keys.length > 800) keys.slice(0, 400).forEach(k => delete nameCache[k]);
+        GM_setValue('cad_name_cache', nameCache);
+        return true;
+    }
+
+    const ucpInflight = Object.create(null);
+    function fetchUcp(uid) {
+        const id = String(uid || '');
+        if (!id || !/^\d+$/.test(id)) return Promise.resolve(null);
+        if (ucpInflight[id]) return ucpInflight[id];
+        const host = (typeof location !== 'undefined' && location.host) ? location.host : 'bbs.nga.cn';
+        const url = 'https://' + host + '/nuke.php?__output=11&__act=get&__lib=ucp&lite=js&uid=' + encodeURIComponent(id);
+        const req = fetch(url, { credentials: 'include', method: 'GET' })
             .then(r => r.json())
             .then(res => {
-                const loc = res && res.data && res.data[0] && res.data[0].ipLoc || '';
+                const loc = res && res.data && (Array.isArray(res.data) ? res.data[0] : res.data) && (res.data[0] || res.data).ipLoc || '';
                 if (loc) {
                     const keys = Object.keys(locCache);
                     if (keys.length > 800) keys.slice(0, 400).forEach(k => delete locCache[k]);
-                    locCache[uid] = loc;
+                    locCache[id] = loc;
                     GM_setValue('cad_loc_cache', locCache);
                 }
-                return loc;
+                const name = nameFromUcpData(res);
+                if (name) rememberName(id, name);
+                return { loc, name };
             })
-            .catch(() => '');
+            .catch(() => null)
+            .finally(() => { delete ucpInflight[id]; });
+        ucpInflight[id] = req;
+        return req;
+    }
+
+    function fetchLoc(uid) {
+        if (locCache[uid]) return Promise.resolve(locCache[uid]);
+        return fetchUcp(uid).then(r => (r && r.loc) || '');
+    }
+
+    function applyCachedNames(posts) {
+        (posts || []).forEach(p => {
+            if (!p || !p.uid) return;
+            if (nameCache[p.uid]) userNameMap[p.uid] = nameCache[p.uid];
+            if (p.name && !isUidLabel(p.name)) return;
+            const n = userNameMap[p.uid] || nameCache[p.uid];
+            if (n && !isUidLabel(n)) p.name = n;
+        });
     }
 
     function ensureLocs() {
         if (!lastData || lastData.kind !== 'posts') return;
+        applyCachedNames(lastData.posts);
+        applyCachedNames(lastData.hot);
         const uids = [...new Set([...(lastData.posts || []), ...(lastData.hot || [])].map(p => p.uid).filter(Boolean))];
-        uids.filter(u => !(u in locMap) && /^\d+$/.test(u)).forEach(uid => {
-            locMap[uid] = '';
-            fetchLoc(uid).then(loc => {
-                if (loc) {
-                    locMap[uid] = loc;
-                    scheduleLocRender();
+        uids.filter(u => /^\d+$/.test(u)).forEach(uid => {
+            const needLoc = !(uid in locMap);
+            const needName = !userNameMap[uid] && !nameCache[uid] && (lastData.posts || []).some(p => p.uid === uid && isUidLabel(p.name));
+            if (!needLoc && !needName) return;
+            if (needLoc) locMap[uid] = locCache[uid] || '';
+            fetchUcp(uid).then(r => {
+                let changed = false;
+                if (r && r.loc && locMap[uid] !== r.loc) { locMap[uid] = r.loc; changed = true; }
+                if (r && r.name) {
+                    applyCachedNames(lastData && lastData.posts);
+                    applyCachedNames(lastData && lastData.hot);
+                    changed = true;
                 }
+                if (changed) scheduleLocRender();
             });
         });
     }
@@ -1284,6 +1611,23 @@
             locRenderTimer = null;
             if (store.on && !covered && !document.hidden) renderApp();
         }, 400);
+    }
+
+    let nameWatchStarted = false;
+    function watchHydratedNames() {
+        if (TEST || nameWatchStarted) return;
+        nameWatchStarted = true;
+        [400, 1200, 3000, 8000].forEach(ms => setTimeout(() => {
+            ingestLiveUserInfo();
+            ingestHydratedAuthors();
+            if (lastData && lastData.kind === 'posts') {
+                const before = (lastData.posts || []).map(p => p.name).join('\0');
+                applyCachedNames(lastData.posts);
+                applyCachedNames(lastData.hot);
+                if ((lastData.posts || []).map(p => p.name).join('\0') !== before) scheduleLocRender();
+            }
+            ensureLocs();
+        }, ms));
     }
 
     /* ================= links ================= */
@@ -1645,8 +1989,12 @@
             return [ctx.key ? 'search: ' + ctx.key : data.board, n + ' topics', ctx.sort].filter(Boolean).join(' · ');
         }
         if (data && data.kind === 'posts') {
-            const n = (data.posts || []).reduce((a, p) => a + (p.sep ? 0 : 1), 0);
-            return [n + ' posts', ctx.filter, ctx.sort].filter(Boolean).join(' · ');
+            const list = store.opOnly ? (data.posts || []).filter(p => p.isOP || p.sep) : (data.posts || []);
+            const n = list.reduce((a, p) => a + (p.sep ? 0 : 1), 0);
+            const label = store.opOnly
+                ? (n ? n + ' OP posts' : (autoPageLoading ? 'loading OP posts' : 'no OP posts on this page'))
+                : n + ' posts';
+            return [label, ctx.filter, ctx.sort].filter(Boolean).join(' · ');
         }
         return 'No thread or board on this page. /help · /board fid';
     }
@@ -2455,12 +2803,28 @@
             cancelPageRequest();
             autoPageError = false;
             store.opOnly = !store.opOnly;
-            lastData = null;
             nextPageUrl = null;
             loadedPages = new Set([location.href]);
             opNextNo = null;
             opEnd = false;
-            out = [line('op only → ' + (store.opOnly ? 'on (author pages append below)' : 'off'), 'cad-faint')];
+            if (store.opOnly) {
+                if (!opUidSticky) {
+                    const args = parsePostArgs(document);
+                    opUidSticky = args.topicAuthor || '';
+                    if (curTid()) opUidTid = curTid();
+                }
+                lastData = extract();
+                const hasOP = lastData && lastData.posts && lastData.posts.some(p => p.isOP && !p.sep);
+                if (!hasOP && opUidSticky) {
+                    out = [line('op only → on. Loading the original poster\'s posts via authorid.', 'cad-faint')];
+                    loadNextPage();
+                } else {
+                    out = [line('op only → on (author pages append below)', 'cad-faint')];
+                }
+            } else {
+                lastData = extract();
+                out = [line('op only → off', 'cad-faint')];
+            }
         }
         else if (m === 'expand') {
             store.expand = !store.expand;
@@ -2703,8 +3067,10 @@
         lastSig = sig;
         const fresh = extract();
         if (fresh && fresh.kind === 'posts') {
-            if (!opUidSticky && (curPageNo() <= 1 || new URLSearchParams(location.search).has('authorid')))
-                opUidSticky = (fresh.posts[0] && fresh.posts[0].uid) || '';
+            if (!opUidSticky) {
+                const args = parsePostArgs(document);
+                opUidSticky = args.topicAuthor || ((curPageNo() <= 1 || new URLSearchParams(location.search).has('authorid')) && fresh.posts[0] && fresh.posts[0].uid) || '';
+            }
         }
         let merged = false;
         if (fresh && lastData && fresh.kind === lastData.kind && location.href === dataHref
@@ -2728,6 +3094,7 @@
             loadedPages.add(location.href);
         }
         ensureLocs();
+        watchHydratedNames();
         renderApp();
         maybeAutoLoad();
     }
@@ -3214,7 +3581,7 @@
                 <div class="cad-line">${store.compact ? 'Read notes/review.md' : 'Open thread ' + data.title}</div>
                 <div class="cad-blocktag">codex</div>
                 <h1 class="cad-title">${data.title}</h1>
-                <div class="cad-kicker">${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} posts${store.opOnly ? ' · OP only' : ''} · cwd: ${cwd}</div>
+                <div class="cad-kicker">${(store.opOnly ? data.posts.filter(p => p.isOP || p.sep) : data.posts).reduce((a, p) => a + (p.sep ? 0 : 1), 0)} posts${store.opOnly ? ' · OP only' : ''} · cwd: ${cwd}</div>
                 ${(!store.opOnly && data.hot && data.hot.length) ? html`<div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'highlights' : 'hot replies'}</span></div>
                     ${data.hot.map(p => html`<${PostBlock} key=${'hot-' + p.id} p=${p} maxLines=${POST_PREVIEW_LINES} />`)}` : null}
                 <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'output' : 'replies'}</span></div>
@@ -3229,6 +3596,12 @@
         if (autoPageLoading) return html`<div class="cad-statusline cad-faint" role="status">Loading the next page…</div>`;
         if (autoPageError) return html`<div class="cad-statusline cad-error" role="alert"><button type="button" class="cad-action cad-idlebtn" onClick=${() => loadNextPage()}>Could not load the next page. Retry</button></div>`;
         const list = lastData && (lastData.posts || lastData.topics);
+        if (store.opOnly && !(lastData && lastData.posts && lastData.posts.some(p => p.isOP && !p.sep)) && !autoPageLoading) {
+            const msg = autoPageError
+                ? 'Could not load the OP authorid view.'
+                : (opUidSticky ? 'No OP posts on this page. Loading the authorid view…' : 'No original-poster uid on this page.');
+            return html`<div class="cad-statusline cad-faint">${msg}</div>`;
+        }
         if (store.autopage && (opModeOn() ? opEnd : !nextPageUrl) && list && list.some(x => x.sep))
             return html`<div class="cad-statusline cad-faint">End of pages</div>`;
         return null;
@@ -3330,15 +3703,19 @@
 
     const Sidebar = () => {
         const boardList = discoverPageBoards();
-        const threads = sidebarThreads();
+        const favs = sidebarFavorites();
+        const recent = sidebarRecent();
         const cur = String(pageFid() || '');
+        ensureFavs();
         return html`<aside class="cad-side">
             <div class="cad-brand">${store.style === 'claude' ? 'Claude' : 'Codex'}</div>
             <div class="cad-side-label">Boards</div>
             ${boardList.length ? boardList.map(b => html`<a class=${String(b.fid) === cur ? 'cad-onitem' : ''} href=${'/thread.php?fid=' + encodeURIComponent(b.fid)} title=${'fid ' + b.fid}>${b.name}</a>`) : html`<button type="button" class="cad-sideitem" onClick=${() => runCmd('board add')}>Save this board</button>`}
             ${cur && !boardList.some(b => String(b.fid) === cur) ? html`<button type="button" class="cad-sideitem" onClick=${() => runCmd('board add')}>Save this board</button>` : null}
             <div class="cad-side-label">Favorites</div>
-            ${threads.length ? threads.slice(0, 16).map(t => html`<a href=${t.href || ('/read.php?tid=' + encodeURIComponent(t.tid))} title=${t.title}>${t.title}</a>`) : html`<div class="cad-sideitem cad-dim">bookmark a thread, or open your favorites</div>`}
+            ${favs.length ? favs.slice(0, 16).map(t => html`<a href=${t.href || ('/read.php?tid=' + encodeURIComponent(t.tid))} title=${t.title}>${t.title}</a>`) : html`<div class="cad-sideitem cad-dim">bookmark a thread, or open your favorites</div>`}
+            <div class="cad-side-label">Recent</div>
+            ${recent.length ? recent.slice(0, 10).map(t => html`<a href=${t.href || ('/read.php?tid=' + encodeURIComponent(t.tid))} title=${t.title}>${t.title}</a>`) : html`<div class="cad-sideitem cad-dim">recent threads appear here</div>`}
         </aside>`;
     };
 
@@ -3504,7 +3881,22 @@
             postBoxes,
             parseQuoteNode,
             parseTopicArgs,
+            parsePostArgs,
             parseUserInfoMap,
+            parseAttachLoads,
+            decodeUuname,
+            absImg,
+            imgSrc,
+            nameFromUcpData,
+            rememberName,
+            ensureLocs,
+            ingestLiveUserInfo,
+            ingestHydratedAuthors,
+            applyCachedNames,
+            nameCache,
+            formatUnix,
+            sidebarFavorites,
+            sidebarRecent,
             discoverPageBoards,
             sidebarThreads,
             isUidLabel,

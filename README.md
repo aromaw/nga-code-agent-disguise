@@ -81,6 +81,6 @@ npm test          # jsdom: disguise.test.js, fixes.test.js, dumps.test.js (dumps
 npm run shots     # Playwright screenshots against the dumps, written to /workspace/nga-dev-shots
 ```
 
-Version 4.1.0 fixes live NGA parsing (duplicate posts, quote headers, search placeholders, reply counts from `topicArg`, spaced board names, author-filter floors) and the desktop chrome (sidebar, slash menu, full-viewport Esc cover). See [CHANGELOG.md](CHANGELOG.md).
+Version 4.1.1 fixes remaining live-page issues from 4.1.0: reply pids after NGA hydrates the DOM, author names (`uuname` / a cached ucp GET), thumbnails from `data-srclazy` and `[img]` BBCode, `op` on a later page, real favorites versus recent threads, quote times, and a slightly wider main column. See [CHANGELOG.md](CHANGELOG.md).
 
 `npm test` runs `node --test tests/disguise.test.js` with jsdom and `tests/fixtures/`. The tests do not contact NGA. Bookmark, vote, new-thread, and notification calls were not exercised against the live site.
