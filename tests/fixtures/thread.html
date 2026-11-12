@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Test thread - NGA</title></head>
+<body>
+<a id="user_name" href="nuke.php?func=ucp">alice</a>
+<div id="m_nav"><a class="nav_link" href="/thread.php?fid=-7">Whirlpool</a></div>
+<div id="m_posts">
+  <h1 id="toppedtopic"><span class="topic">Test thread</span></h1>
+  <div class="forumbox postbox" id="post1">
+    <div class="posterinfo"><a class="author" href="nuke.php?func=ucp&amp;uid=101">Alice</a></div>
+    <div class="postinfo"><a href="read.php?tid=9&amp;pid=555">#1</a> 2026-11-01 10:00</div>
+    <div class="postcontent" id="postcontent1">alpha<br>beta <a href="https://example.com/a">https://example.com/a</a> <img alt="smile" class="smile" src="/smile.gif"><img src="about:blank" data-src="//img.nga.178.com/attachments/a.jpg"><img src="about:blank"><pre>if (ok) {
+  run();
+}</pre><div class="quote">quoted<br>bit</div></div>
+    <a onclick="postfunc.quote(555)">quote</a>
+  </div>
+  <div class="forumbox postbox" id="post2">
+    <div class="posterinfo"><a class="author" href="nuke.php?func=ucp&amp;uid=202">Bob</a></div>
+    <div class="postinfo"><a href="read.php?tid=9&amp;pid=556">#2</a> 2026-11-01 11:00</div>
+    <div class="postcontent" id="postcontent2">line-00<br>line-01<br>line-02<br>line-03<br>line-04<br>line-05<br>line-06<br>line-07<br>line-08<br>line-09<br>line-10<br>line-11<br>line-12<br>line-13<br>line-14<br>line-15-hidden</div>
+  </div>
+</div>
+<div id="m_pbtnbtm">
+  <a href="/read.php?tid=9&amp;page=1">上一页</a>
+  <a href="/read.php?tid=9&amp;page=1">1</a>
+  <a href="/read.php?tid=9&amp;page=2">2</a>
+  <a href="/read.php?tid=9&amp;page=3">3</a>
+  <a href="/read.php?tid=9&amp;page=3">下一页</a>
+</div>
+<form id="postform" action="/post.php?action=reply" method="post" accept-charset="GBK">
+  <input type="hidden" name="action" value="reply">
+  <input type="hidden" name="tid" value="9">
+  <input type="hidden" name="step" value="2">
+  <input type="hidden" name="pid" value="0">
+  <input type="hidden" name="token" value="abc123">
+  <textarea name="post_content"></textarea>
+</form>
+</body></html>
