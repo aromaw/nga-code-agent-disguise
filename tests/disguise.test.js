@@ -170,7 +170,9 @@ test('does not swallow keys in fields or during IME composition', async () => {
 
     const live = load(emptyHtml, 'https://bbs.nga.cn/', { cad_on: true });
     live.cad.boot();
+    await new Promise(resolve => setTimeout(resolve, 0));
     const input = live.document.querySelector('.cad-real');
+    assert.equal(live.document.activeElement, input);
     const duringIme = fakeKey({ key: 'Process', code: 'Backquote', keyCode: 229, currentTarget: input });
     live.cad.onInputKey(duringIme);
     assert.equal(duringIme.defaultPrevented, false);
@@ -184,8 +186,9 @@ test('does not swallow keys in fields or during IME composition', async () => {
     await new Promise(resolve => setTimeout(resolve, 150));
 
     const toggle = keydown(live.window, 'keydown', { key: '`', code: 'Backquote' }, input);
-    assert.equal(toggle.defaultPrevented, true);
-    assert.equal(live.cad.store.on, false);
+    assert.equal(toggle.defaultPrevented, false);
+    assert.equal(live.cad.store.on, true);
+    assert.equal(live.document.activeElement, input);
 });
 
 test('vim h scrolls and does not change pages', () => {
@@ -313,9 +316,9 @@ test('reading: links, per-post expand, image toggle, help panel and real status'
     assert.match(panel.textContent, /bookmark/);
     assert.match(panel.textContent, /sort reply/);
     assert.match(panel.textContent, /vote <floor>/);
-    assert.equal(document.querySelector('#cad__body').textContent.includes('quote <floor>'), false);
+    assert.equal(document.querySelector('#cad-floor-1').textContent.includes('quote <floor>'), false);
     document.querySelector('[data-hint="reply"]').click();
-    assert.match(document.querySelector('.cad-real').value, /^reply /);
+    assert.match(document.querySelector('.cad-real').value, /^\/reply /);
     const collapsed = document.querySelector('#cad-floor-2');
     collapsed.click();
     assert.match(document.querySelector('#cad__body').textContent, /line-15-hidden/);
@@ -329,7 +332,8 @@ test('the shell scrolls inside a column and the cover hides that column', async 
     const input = document.querySelector('.cad-inputbar');
     const status = document.querySelector('.cad-statusbar');
     assert.equal(window.getComputedStyle(app).display, 'flex');
-    assert.equal(window.getComputedStyle(app).flexDirection, 'column');
+    assert.equal(window.getComputedStyle(app).flexDirection, 'row');
+    assert.equal(window.getComputedStyle(document.querySelector('.cad-main')).flexDirection, 'column');
     assert.notEqual(window.getComputedStyle(body).display, 'none');
     assert.match(body.textContent, /alpha/);
     await cad.runCmd('pause');
@@ -340,7 +344,8 @@ test('the shell scrolls inside a column and the cover hides that column', async 
     const cover = document.querySelector('.cad-cover');
     assert.ok(cover);
     assert.notEqual(window.getComputedStyle(cover).display, 'none');
-    assert.match(cover.textContent, /Static example/);
+    assert.match(cover.textContent, /handleRequest/);
+    assert.equal(cover.textContent.includes('Static example'), false);
     assert.match(body.textContent, /alpha/);
 });
 
@@ -390,6 +395,38 @@ test('clicking a collapsed post expands it, and hint chips are discoverable', ()
     assert.match(document.querySelector('#cad-floor-2').textContent, /line-15-hidden/);
     document.querySelector('[data-hint="help"]').click();
     assert.match(document.querySelector('.cad-panel').textContent, /bookmark list/);
+});
+
+test('live NGA markup: pid, quote header, leading indent, collapse, and filters', async () => {
+    const live = load(fs.readFileSync(path.join(__dirname, 'fixtures', 'live-thread.html'), 'utf8'), 'https://bbs.nga.cn/read.php?tid=9&authorid=202');
+    const data = live.cad.extract();
+    assert.equal(data.posts[0].pid, '900');
+    assert.equal(data.posts[0].floor, 0);
+    assert.equal(data.posts[0].text.startsWith('alpha'), true);
+    assert.equal(data.posts[1].pid, '901');
+    assert.equal(data.posts[1].likes, '-3');
+    assert.equal(data.posts[1].isOP, false);
+    const quote = data.posts[1].quotes[0];
+    assert.equal(quote.text.includes('+R'), false);
+    assert.equal(quote.text.includes('undefined'), false);
+    assert.match(quote.text, /quoted line/);
+    assert.equal(quote.author, 'Carol');
+    assert.equal(quote.time, '');
+    assert.equal(data.title.includes('中的回复'), false);
+    const long = 'word '.repeat(400);
+    const box = new live.window.DOMParser().parseFromString('<div class="postcontent">' + long + '</div>', 'text/html');
+    live.cad.boot();
+    assert.match(live.document.querySelector('.cad-expand').textContent, /expand/);
+    assert.equal(live.document.querySelector('#cad-floor-2').textContent.includes('line-19'), false);
+    live.cad.store.opOnly = true;
+    await live.cad.runCmd('author off');
+    assert.equal(live.cad.store.opOnly, false);
+    await live.cad.runCmd('boards');
+    assert.match(live.document.querySelector('.cad-panel').textContent, /board/);
+    await live.cad.runCmd('bookmark');
+    await live.cad.runCmd('n');
+    assert.match(live.document.querySelector('.cad-panel').textContent, /Bookmark cancelled/);
+    assert.ok(box);
 });
 
 test('sort, floor, author, vote, bookmark, and new thread stay behind an explicit confirm', async () => {

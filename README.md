@@ -2,9 +2,9 @@
 
 # NGA Code Agent Disguise
 
-A Tampermonkey script that shows NGA (`bbs.nga.cn`, `ngabbs.com`, `bbs.ngacn.cc`, `nga.178.com`) as a Claude Code or Codex CLI session.
+A Tampermonkey script that shows NGA (`bbs.nga.cn`, `ngabbs.com`, `bbs.ngacn.cc`, `nga.178.com`) as a Claude or Codex desktop session: a project sidebar, a conversation in the main pane, and a composer along the bottom.
 
-![Thread in the Claude theme](docs/screenshots/thread-dark.png)
+![Desktop session, Claude theme](docs/screenshots/desktop-dark.png)
 
 ## Install
 
@@ -15,9 +15,11 @@ A Tampermonkey script that shows NGA (`bbs.nga.cn`, `ngabbs.com`, `bbs.ngacn.cc`
 
 ## How it reads
 
-The thread title, floor, author, time, and recommend count are separate. Quotes sit on an accent bar. Long posts stop at 14 lines; click the card or `expand N more lines`. Images stay `[image]` until you click one or turn `img` on, which loads lazy thumbnails. URLs in the body are links. The text column is 92 characters wide so a wide monitor does not stretch lines. The prompt and status stay on screen.
+Boards and bookmarks sit in the left sidebar. The top bar is the board, the thread, the page, and the active sort or filter. Posts are message cards: floor, author, time, and recommend count in the header, quotes as a nested block with the author, images as thumbnails when `img` is on and as an `[image]` link when it is off. Long posts collapse; click the card or `expand N more lines`.
 
-A row of chips above the prompt starts the common commands. `Tab` completes the rest. `y` is required before a reply, a new thread, a bookmark, or a vote is sent.
+The composer is multi-line. Enter or Send runs the text. Shift+Enter inserts a line. Chips and a `/` menu insert real commands (`/help`, `/reply`, `/board`, and the rest). `boards` is the same as `board list`. A backtick does not close the overlay while the composer is focused. Opening the overlay focuses the composer. Esc, including from the composer, covers the screen with a dark code-review session.
+
+Send, and `y`, are required before a reply, a new thread, a bookmark, or a vote. Cancel, and `n`, name the thing you cancelled.
 
 ## Keys
 

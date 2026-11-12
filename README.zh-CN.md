@@ -2,9 +2,9 @@
 
 # NGA Code Agent 伪装
 
-Tampermonkey 脚本。把 NGA（`bbs.nga.cn`、`ngabbs.com`、`bbs.ngacn.cc`、`nga.178.com`）显示成 Claude Code 或 Codex CLI。
+Tampermonkey 脚本。把 NGA（`bbs.nga.cn`、`ngabbs.com`、`bbs.ngacn.cc`、`nga.178.com`）显示成 Claude 或 Codex 桌面会话：左侧是版块和收藏，中间是对话，底部是输入框。
 
-![Claude 主题下的帖子](docs/screenshots/thread-dark.png)
+![桌面会话，Claude 主题](docs/screenshots/desktop-dark.png)
 
 ## 安装
 
@@ -15,9 +15,11 @@ Tampermonkey 脚本。把 NGA（`bbs.nga.cn`、`ngabbs.com`、`bbs.ngacn.cc`、`
 
 ## 阅读
 
-标题、楼层、作者、时间和推荐数分开显示。引用靠一条强调色的边。长楼层先显示 14 行，点击卡片或 `expand N more lines` 展开。图片默认是 `[image]`，点开一张，或用 `img` 打开懒加载缩略图。正文里的 URL 可以点。正文栏大约 92 个字符宽，宽屏幕不会把行拉得很长。提示符和状态栏留在屏幕上。
+版块和收藏在左侧。顶栏是版块、帖子、页码，以及当前的排序或筛选。楼层是消息卡片：楼层号、作者、时间和推荐数在头上，引用是嵌套块并带作者，`img` 打开时图片是缩略图，关闭时是 `[image]` 链接。长楼层会折叠，点击卡片或 `expand N more lines` 展开。
 
-提示符上方有一排常用命令。`Tab` 补全其余命令。回复、新帖、收藏和投票都要先输入 `y` 才会发出。
+底部输入框可以多行。Enter 或 Send 执行，Shift+Enter 换行。按钮和 `/` 菜单插入真实命令。`boards` 等于 `board list`。焦点在输入框里时，反引号不会关掉伪装。打开伪装会聚焦输入框。Esc，包括在输入框里，会盖上一屏深色的代码审阅会话。
+
+回复、新帖、收藏和投票都要按 Send 或 `y` 才会发出。Cancel 和 `n` 会按动作本身来写取消文案。
 
 ## 按键
 

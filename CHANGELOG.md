@@ -1,5 +1,25 @@
 # Changelog
 
+## 4.0.0
+
+The overlay is a desktop chat app, not a terminal. Parsing follows live NGA markup.
+
+### Changed
+
+- Left sidebar for boards and bookmarks, main pane for the thread, top bar for the board, title, page, and sort or filter pills, and a multi-line composer with a Send button.
+- Slash chips insert real commands (`/help`, `/reply`, `/board`, and the rest). `boards` runs `board list`.
+- Help and previews sit in the scrolling main pane. Confirm is a card with Send and Cancel, and `y` / `n` still work.
+- The Esc cover is a dark code-review session. Backtick does not toggle while the composer is focused. Opening the overlay focuses the composer.
+- Post text drops a leading indent. Quotes show author and time, not `+R` or `undefined`. Recommend scores keep a minus sign. Long posts collapse by line count and by length.
+
+### Fixed
+
+- Pid comes from `pid…Anchor` and `pid=` links, including links beside the post.
+- `author` and `op` are separate. `author off` clears the author filter and turns `op` off.
+- `user` shows the name from the page or from `nuke.php` ucp data, plus a profile link.
+- `bookmark list` links open the thread. Bookmark actions ignore the favorites-list URL.
+- Cancel copy names the action (`Bookmark cancelled`, `Vote cancelled`, `New thread cancelled`).
+
 ## 3.1.0
 
 A cleaner terminal shell, and more of the forum inside it.

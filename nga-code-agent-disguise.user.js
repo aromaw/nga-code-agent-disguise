@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NGA Code Agent Disguise
 // @namespace    https://github.com/aromaw/nga-code-agent-disguise
-// @version      3.1.0
+// @version      4.0.0
 // @description  Disguise NGA forum pages as a Claude Code / Codex CLI session. Backtick toggles outside text fields, /help lists commands, and reply/quote post through the site's own form after a confirm step.
 // @author       aromaw
 // @match        *://bbs.nga.cn/*
@@ -20,7 +20,7 @@
     'use strict';
 
     const TEST = typeof globalThis !== 'undefined' && !!globalThis.__CAD_TEST;
-    const VERSION = '3.1.0';
+    const VERSION = '4.0.0';
     const POST_PREVIEW_LINES = 14;
 
     /* ================= settings ================= */
@@ -50,17 +50,18 @@
     const FAKE_DIR = '~/projects/api-server';
     const COVER_TEXT = [
         'src/server.ts',
-        '  ✓ Validate request parameters before dispatch',
-        '  ✓ Propagate cancellation to downstream handlers',
-        '  ✓ Return consistent errors at the API boundary',
+        'You',
+        'Review the error path in handleRequest before we ship.',
         '',
-        'async function handleRequest(request, context) {',
-        '  const input = validate(request);',
-        '  const result = await service.execute(input, {',
-        '    signal: context.signal,',
-        '  });',
-        '  return response.ok(result);',
-        '}',
+        'Claude',
+        'I read src/server.ts. The handler returns ok even when the service rejects.',
+        '',
+        '  @@ handleRequest',
+        '  - return response.ok(result);',
+        '  + if (!result.ok) return response.error(result.error);',
+        '  + return response.ok(result);',
+        '',
+        'The change stays inside handleRequest. Waiting on you.',
     ].join('\n');
     const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#0d0d0d"/><text x="50" y="70" font-size="62" text-anchor="middle" fill="#fff" font-family="monospace">›</text></svg>'
@@ -102,14 +103,25 @@
         position:fixed; inset:0; z-index:2147483000;
         display:flex; flex-direction:column;
         background:var(--bg); color:var(--text);
-        font-family:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,"Maple Mono NF CN","Sarasa Mono SC","Microsoft YaHei UI",monospace;
-        font-size:14.5px; line-height:1.65; letter-spacing:0;
+        font-family:"Segoe UI","PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",sans-serif;
+        font-size:15px; line-height:1.65; letter-spacing:0;
     }
     #cad__root, #cad__root * { box-sizing:border-box; }
     #cad__root button { font:inherit; color:inherit; }
     #cad__root a:focus-visible, #cad__root button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
     /* The shell is one column inside the fixed root, so the post list scrolls and the prompt stays put. */
-    .cad-app { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+    .cad-app { flex:1; min-height:0; display:flex; flex-direction:row; overflow:hidden; }
+    .cad-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--bg); }
+    .cad-side { width:248px; flex-shrink:0; border-right:1px solid var(--border); background:color-mix(in srgb, var(--text) 3%, var(--bg)); display:flex; flex-direction:column; min-height:0; overflow:auto; padding:14px 10px; }
+    .cad-brand { font-weight:650; font-size:14px; padding:4px 8px 12px; }
+    .cad-side-label { font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--dim); padding:10px 8px 4px; }
+    .cad-side a, .cad-side button.cad-sideitem { display:block; width:100%; text-align:left; border:0; background:transparent; color:var(--text); border-radius:8px; padding:7px 8px; text-decoration:none; }
+    .cad-side a:hover, .cad-side button.cad-sideitem:hover, .cad-side .cad-onitem { background:var(--band); }
+    .cad-pill { border:1px solid var(--border); border-radius:999px; padding:2px 8px; font-size:12px; color:var(--dim); background:transparent; }
+    .cad-crumb { font-size:13px; color:var(--dim); }
+    .cad-modal { margin:8px 0 12px; }
+    .cad-modal-card { border:1px solid var(--border); border-radius:12px; padding:12px 14px; background:var(--bg-input); color:var(--text); }
+    #cad__root pre, #cad__root .cad-preview, #cad__root .cad-cover-code { background:transparent !important; color:var(--text) !important; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; }
     #cad__root .cad-body { min-height:0; overflow-x:hidden; overscroll-behavior:contain; }
 
     .cad-topbar { flex-shrink:0; min-height:30px; display:flex; align-items:center; gap:6px; padding:0 10px; user-select:none; border-bottom:1px solid var(--border); }
@@ -163,7 +175,7 @@
     .cad-post { position:relative; margin:0 0 12px; padding:10px 14px 12px; border:1px solid var(--border); border-radius:8px; background:color-mix(in srgb, var(--text) 3.5%, transparent); }
     .cad-post.cad-collapsed { cursor:pointer; }
     .cad-post.cad-collapsed:hover { border-color:var(--accent); }
-    .cad-post .cad-posthead { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; color:var(--faint); font-size:12px; margin:0 0 8px; }
+    .cad-post .cad-posthead { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; color:var(--dim); font-size:13px; margin:0 0 8px; }
     .cad-floor { color:var(--accent); font-weight:700; min-width:2.2em; }
     .cad-author { color:var(--text); font-weight:650; padding:0; }
     .cad-likes { color:var(--accent2); }
@@ -188,16 +200,18 @@
     .cad-inputbar > .cad-faint { max-width:35%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .cad-inputbar .prompt { color:var(--text); font-weight:700; }
     .cad-real {
-        flex:1; min-width:60px; background:transparent; border:none; outline:none;
-        color:inherit; font:inherit; letter-spacing:inherit; padding:0; margin:0; caret-color:var(--text);
+        flex:1; width:100%; min-height:52px; resize:vertical; background:var(--bg-input); color:var(--text);
+        border:1px solid var(--border); border-radius:12px; outline:none; font:inherit; padding:10px 12px; caret-color:var(--text);
     }
+    .cad-send { align-self:flex-end; background:var(--accent); color:var(--bg); border:0; border-radius:8px; padding:6px 14px; cursor:pointer; }
+    .cad-inputbar { flex-direction:column; align-items:stretch; }
     .cad-real::placeholder { color:var(--faint); }
     .cad-cursor { width:8px; height:16px; background:var(--text); display:inline-block; flex-shrink:0; animation:cad-blink 1.06s step-end infinite; }
     @keyframes cad-blink { 50% { opacity:0; } }
     .cad-statusbar {
-        flex-shrink:0; min-height:28px; display:flex; align-items:center; gap:8px;
-        padding:0 22px; color:var(--faint); font-size:11.5px; user-select:none; overflow:hidden; white-space:nowrap;
-        background:color-mix(in srgb, var(--text) 4%, transparent);
+        flex-shrink:0; min-height:32px; display:flex; align-items:center; gap:8px;
+        padding:0 16px; color:var(--dim); font-size:13px; user-select:none; overflow:hidden; white-space:nowrap;
+        background:var(--bg); border-top:1px solid var(--border);
     }
     .cad-statusbar .seg { color:var(--dim); }
     .cad-statusbar .seg.hi { color:var(--link); }
@@ -206,7 +220,7 @@
     .cad-statusbar .cad-flag { padding:0 4px; }
     .cad-pagesep { color:var(--faint); margin:12px 0 2px; display:flex; align-items:center; gap:10px; user-select:none; }
     .cad-pagesep::before, .cad-pagesep::after { content:''; flex:1; border-top:1px dashed var(--border); }
-    .cad-panel { flex-shrink:0; max-height:42vh; overflow:auto; border-top:1px solid var(--border); background:var(--bg); padding:8px 22px 10px; }
+    .cad-panel { max-height:none; overflow:visible; border:1px solid var(--border); border-radius:12px; background:var(--bg-input); color:var(--text); padding:12px 14px; margin:0 0 14px; }
     .cad-panelhead { display:flex; justify-content:space-between; align-items:center; gap:12px; color:var(--accent2); position:sticky; top:0; background:var(--bg); }
     .cad-compose { width:100%; min-height:7em; margin:8px 0; background:var(--bg-input); color:inherit; border:1px solid var(--border); font:inherit; padding:8px; resize:vertical; }
     .cad-preview { white-space:pre-wrap; word-break:break-word; margin:8px 0; padding:8px 10px; border:1px dashed var(--border); border-radius:6px; }
@@ -214,8 +228,8 @@
     .cad-covered .cad-body, .cad-covered .cad-inputbar, .cad-covered .cad-statusbar, .cad-covered .cad-panel, .cad-covered .cad-hints { display:none !important; }
     .cad-statusline { margin-top:14px; padding:8px 12px; border:1px solid var(--border); border-radius:8px; }
     .cad-statusline.cad-error { border-color:var(--accent); }
-    .cad-cover { flex:1; overflow:auto; padding:24px; }
-    .cad-cover-code { color:var(--dim); line-height:1.8; white-space:pre-wrap; }
+    .cad-cover { flex:1; overflow:auto; padding:28px 32px; background:var(--bg); color:var(--text); }
+    .cad-cover-code { color:var(--dim) !important; background:transparent !important; line-height:1.7; white-space:pre-wrap; margin:0; }
     .cad-idlebtn { color:var(--link); }
     @media (prefers-reduced-motion:reduce) { .cad-cursor { animation:none; } }
     @media (max-width:760px) {
@@ -505,11 +519,18 @@
         return { main: main || alt, alt: alt && alt !== main ? alt : '' };
     }
 
+    function stripQuoteHeader(s) {
+        return String(s || '')
+            .replace(/^(?:Reply\s+to\s+)?(?:\+R\s+by|Reply(?:\s+to)?(?:\s+\+R\s+by)?|Post\s+by)[^\n]*$/gim, '')
+            .replace(/\bundefined\b/gi, '');
+    }
+
     function cleanText(s) {
         const lines = String(s || '').split(String.fromCharCode(0x200b)).join('').split('\n').map(l => l.trimEnd());
         const invis = /^\s*$/;
         while (lines.length && invis.test(lines[0])) lines.shift();
         while (lines.length && invis.test(lines[lines.length - 1])) lines.pop();
+        if (lines.length) lines[0] = lines[0].replace(/^[ \t\u3000]+/, '');
         return lines.join('\n').replace(/\n{3,}/g, '\n\n');
     }
 
@@ -547,11 +568,14 @@
             i.replaceWith('%%IMG' + (imgs.length - 1) + '%%');
         });
         clone.querySelectorAll('script,style,button,.recommendvalue,.ogoodbtn,.postBtnPos,.postinfo,.single_ttip2,.postbtnsc,.right_').forEach(i => i.remove());
-        return { text: cleanText(plainText(clone)), imgs };
+        return { text: cleanText(stripQuoteHeader(plainText(clone))), imgs };
     }
 
     function cleanTitle(t) {
-        return String(t || '').replace(/[\s\-_]*(\u004eGA\u73a9\u5bb6\u793e\u533a|\u827e\u6cfd\u62c9\u65af\u56fd\u5bb6\u5730\u7406\u8bba\u575b|NGA)\s*$/i, '').trim();
+        let s = String(t || '');
+        const filtered = s.match(/\u5728\s*(.*?)\s*\u4e2d\u7684\u56de\u590d/);
+        if (filtered && filtered[1]) s = filtered[1];
+        return s.replace(/[\s\-_]*(\u004eGA\u73a9\u5bb6\u793e\u533a|\u827e\u6cfd\u62c9\u65af\u56fd\u5bb6\u5730\u7406\u8bba\u575b|NGA)\s*$/i, '').replace(/^[-–—\s]+|[-–—\s]+$/g, '').trim();
     }
 
     function extractTopics(doc, baseUrl) {
@@ -598,53 +622,92 @@
             || '';
     }
 
+    function pidFromNode(node) {
+        if (!node || !node.querySelectorAll) return '';
+        const ids = [...node.querySelectorAll('[id*="pid" i], [name*="pid" i]')].map(el => (el.id || el.getAttribute('name') || '')).join(' ');
+        const idMatch = ids.match(/pid(\d+)/i);
+        if (idMatch) return idMatch[1];
+        const hrefs = [...node.querySelectorAll('a[href*="pid="]')].map(a => a.getAttribute('href') || '').join(' ');
+        const hrefMatch = hrefs.match(/[?&#]pid=(\d+)/i);
+        if (hrefMatch) return hrefMatch[1];
+        const oc = [...node.querySelectorAll('[onclick]')].map(el => el.getAttribute('onclick') || '').join(' ');
+        const click = oc.match(/quote\(\s*(\d+)\s*\)|pid[=:]\s*(\d+)/i);
+        return (click && (click[1] || click[2])) || '';
+    }
+
     function postPid(b) {
-        const link = b.querySelector('a[href*="pid="]');
-        const fromHref = link && ((link.getAttribute('href') || '').match(/[?&]pid=(\d+)/) || [])[1];
-        if (fromHref) return fromHref;
-        const oc = [...b.querySelectorAll('[onclick]')].map(el => el.getAttribute('onclick') || '').join(' ');
-        const fromClick = (oc.match(/quote\(\s*(\d+)\s*\)|pid[=:]\s*(\d+)/i) || []);
-        return fromClick[1] || fromClick[2] || '';
+        return pidFromNode(b)
+            || pidFromNode(b.previousElementSibling)
+            || pidFromNode(b.nextElementSibling)
+            || pidFromNode(b.parentElement)
+            || '';
+    }
+
+    function postFloor(b, i, infoText) {
+        const floorM = String(infoText || '').match(/#\s*(\d+)/);
+        if (floorM) return parseInt(floorM[1], 10);
+        const nodes = [...b.querySelectorAll('[id^="l"], [name^="l"]')];
+        if (b.parentElement) nodes.push(...b.parentElement.querySelectorAll(':scope > [id^="l"], :scope > [name^="l"], :scope > a[name^="l"]'));
+        for (const n of nodes) {
+            const m = String(n.id || n.getAttribute('name') || '').match(/^l(\d+)$/i);
+            if (m) return parseInt(m[1], 10);
+        }
+        return i;
+    }
+
+    function parseQuoteNode(q) {
+        let depth = 0;
+        let n = q.parentElement;
+        while (n) {
+            if (n.classList && n.classList.contains('quote')) depth++;
+            n = n.parentElement;
+        }
+        const clone = q.cloneNode(true);
+        clone.querySelectorAll('.quote').forEach(x => x.remove());
+        const uidLink = clone.querySelector('a[href*="uid="]');
+        const uid = uidLink ? (((uidLink.getAttribute('href') || '').match(/uid=(\d+)/) || [])[1] || '') : '';
+        const author = uidLink ? text(uidLink) : '';
+        const pid = pidFromNode(clone);
+        let raw = cleanText(plainText(clone));
+        let time = '';
+        let name = author;
+        const header = raw.match(/^(?:Reply\s+to\s+)?(?:\+R\s+by|Post\s+by|Reply)\s+(?:\[([^\]]+)\]|([^\s(]+))\s*(?:\(([^)]*)\))?\s*/i);
+        if (header) {
+            if (!name) name = (header[1] || header[2] || '').trim();
+            time = (header[3] || '').replace(/undefined/ig, '').trim();
+            raw = raw.slice(header[0].length);
+        }
+        raw = raw.replace(/\bundefined\b/gi, '');
+        return { depth, text: cleanText(raw), author: name, time, uid, pid };
     }
 
     function parsePost(b, i, opUid) {
         const content = b.querySelector('.postcontent, [id^="postcontent"]');
         const infoText = text(b.querySelector('[class*="postinfo" i]')) || text(b.querySelector('.postBtnPos'));
-        const floorM = infoText.match(/#\s*(\d+)/);
         const dateM = infoText.match(/\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?/);
         const uid = postUid(b);
-        const pid = postPid(b);
+        let pid = postPid(b);
         let name = text(b.querySelector('.posterinfo .author, .posterInfoLine .author'))
             || text(b.querySelector('[id^="postauthor"]')) || uid || 'user';
-        const isOP = (opUid && uid && uid === opUid) || /\u697c\u4e3b/.test(name);
+        let authorFiltered = false;
+        try { authorFiltered = new URL(location.href).searchParams.has('authorid'); } catch (err) { authorFiltered = false; }
+        const isOP = /\u697c\u4e3b/.test(name) || (!authorFiltered && opUid && uid && uid === opUid);
         name = name.replace(/\u697c\u4e3b/g, '').replace(/^\[|\]$/g, '').replace(/^UID\s*[:：]\s*/i, '').trim() || uid || 'user';
         const likeEl = b.querySelector('.recommendvalue');
         const likes = likeEl ? recommendScore(text(likeEl)) : '';
         const quotes = content
-            ? [...content.querySelectorAll('.quote')].map(q => {
-                let depth = 0, n = q.parentElement;
-                while (n) {
-                    if (n.classList && n.classList.contains('quote')) depth++;
-                    n = n.parentElement;
-                }
-                const c = q.cloneNode(true);
-                c.querySelectorAll('.quote').forEach(x => x.remove());
-                c.querySelectorAll('img').forEach(im => {
-                    const alt = im.getAttribute('alt');
-                    isEmote(im) ? im.replaceWith(alt ? '[' + alt + ']' : '') : im.remove();
-                });
-                return { depth, text: cleanText(plainText(c)) };
-            }).filter(q => q.text)
+            ? [...content.querySelectorAll('.quote')].map(parseQuoteNode).filter(q => q.text || q.author)
             : [];
-        const floor = floorM ? parseInt(floorM[1], 10) : i;
+        if (!pid) pid = (quotes.find(q => q.pid) || {}).pid || '';
+        const floor = postFloor(b, i, infoText);
         const head = [
-            '#' + (floorM ? floorM[1] : i + 1),
+            '#' + floor,
             name + (uid && uid !== name ? '(' + uid + ')' : ''),
             dateM && dateM[0],
             likes !== '' ? formatScore(likes) : '',
         ].filter(Boolean).join(' · ');
         const body = contentText(content);
-        const id = floorM ? 'floor:' + floorM[1] + ':' + uid : [uid, dateM && dateM[0], body.text.slice(0, 40)].join('|');
+        const id = 'floor:' + floor + ':' + uid;
         return { id, floor, pid, head, uid, name, isOP, date: dateM && dateM[0] || '', likes, text: body.text, imgs: body.imgs, quotes };
     }
 
@@ -663,9 +726,21 @@
         return [];
     }
 
+    function postBoxes(doc) {
+        const direct = [...doc.querySelectorAll('.forumbox.postbox, table.postbox, [id^="postcontainer"]')];
+        if (direct.length) return direct;
+        const seen = new Set();
+        const boxes = [];
+        doc.querySelectorAll('.postcontent, [id^="postcontent"]').forEach(el => {
+            const box = el.closest('table, .forumbox, [id^="post"]') || el.parentElement;
+            if (box && !seen.has(box)) { seen.add(box); boxes.push(box); }
+        });
+        return boxes;
+    }
+
     function extractPosts(doc, opUidOverride) {
         doc = doc || document;
-        const allBoxes = [...doc.querySelectorAll('.forumbox.postbox')];
+        const allBoxes = postBoxes(doc);
         if (!allBoxes.length) return null;
         const elTitle = text(doc.querySelector('#toppedtopic .topic, .catetitle, h1 .topic'));
         const title = cleanTitle(elTitle || realTitle || document.title);
@@ -673,8 +748,10 @@
         const boxes = allBoxes.filter(b => !hotBoxes.some(hb => hb === b || hb.contains(b)));
         if (!boxes.length) return null;
         const markedOP = boxes.find(b => /\u697c\u4e3b/.test(text(b.querySelector('.posterinfo .author, .posterInfoLine .author, [id^="postauthor"]'))));
+        let authorFiltered = false;
+        try { authorFiltered = new URL(location.href).searchParams.has('authorid'); } catch (err) { authorFiltered = false; }
         const opUid = opUidOverride !== undefined ? opUidOverride
-            : (opUidTid === curTid() && opUidSticky) || (markedOP ? postUid(markedOP) : curPageNo() <= 1 ? postUid(boxes[0]) : '');
+            : (authorFiltered ? '' : ((opUidTid === curTid() && opUidSticky) || (markedOP ? postUid(markedOP) : curPageNo() <= 1 ? postUid(boxes[0]) : '')));
         const posts = boxes.map((b, i) => parsePost(b, i, opUid));
         if (opUidOverride === undefined && posts.length && posts[0].text.startsWith(title)) {
             posts[0].text = cleanText(posts[0].text.slice(title.length));
@@ -1108,6 +1185,43 @@
         const u = new URL(location.href);
         u.searchParams.set('page', String(n));
         location.href = withAuthorid(u.href);
+    }
+
+    function contextLine(data) {
+        const ctx = viewBits();
+        if (data && data.kind === 'topics') {
+            const n = (data.topics || []).reduce((a, t) => a + (t.sep ? 0 : 1), 0);
+            return [ctx.key ? 'search: ' + ctx.key : data.board, n + ' topics', ctx.sort].filter(Boolean).join(' · ');
+        }
+        if (data && data.kind === 'posts') {
+            const n = (data.posts || []).reduce((a, p) => a + (p.sep ? 0 : 1), 0);
+            return [n + ' posts', ctx.filter, ctx.sort].filter(Boolean).join(' · ');
+        }
+        return 'No thread or board on this page. /help · /board fid';
+    }
+
+    function viewBits() {
+        let order = '';
+        let key = '';
+        let author = '';
+        try {
+            const u = new URL(location.href);
+            order = u.searchParams.get('order_by') || '';
+            key = u.searchParams.get('key') || '';
+            author = u.searchParams.get('authorid') || '';
+        } catch (err) { /* keep defaults */ }
+        const sort = /postdate/i.test(order) ? 'latest post' : (order || (key ? '' : 'latest reply'));
+        const filter = store.opOnly ? 'OP only' : (author ? 'author ' + author : '');
+        return { order, key, author, sort, filter };
+    }
+
+    function focusPrompt() {
+        setTimeout(() => {
+            if (!store.on || covered || !inputEl) return;
+            const active = document.activeElement;
+            if (active && active !== inputEl && root && !root.contains(active) && active.blur) active.blur();
+            inputEl.focus();
+        }, 0);
     }
 
     function focusInput(preset) {
@@ -1571,6 +1685,49 @@
         return { rows: rows.slice(0, 20), url, login };
     }
 
+    function favoriteLinks(doc) {
+        const data = extractTopics(doc);
+        if (data && data.topics && data.topics.filter(t => !t.sep).length) return data.topics.filter(t => !t.sep);
+        const out = [];
+        const seen = new Set();
+        doc.querySelectorAll('a[href*="read.php"], a[href*="tid="]').forEach(a => {
+            const href = a.getAttribute('href') || '';
+            const title = text(a);
+            if (!title || title.length < 2 || seen.has(href)) return;
+            seen.add(href);
+            let abs = href;
+            try { abs = new URL(href, location.href).href; } catch (err) { abs = href; }
+            out.push({ title, href: abs });
+        });
+        return out;
+    }
+
+    async function cmdUser(token) {
+        const card = userCard(token);
+        let name = card.name;
+        let loc = card.loc;
+        if (card.uid) {
+            try {
+                const res = await fetch('https://' + location.host + '/nuke.php?__output=11&__act=get&__lib=ucp&uid=' + encodeURIComponent(card.uid), { credentials: 'include' });
+                const json = await res.json();
+                const row = json && json.data && json.data[0] || {};
+                name = row.username || row.nick || row.name || name;
+                loc = row.ipLoc || loc;
+                if (loc) locMap[card.uid] = loc;
+            } catch (err) { /* keep the name already on the page */ }
+        }
+        const href = card.href || (card.uid ? new URL('/nuke.php?func=ucp&uid=' + encodeURIComponent(card.uid), location.href).href : '');
+        panel = {
+            title: 'user',
+            html: [
+                line(esc((name || 'reader') + (card.uid ? ' · uid ' + card.uid : '') + (loc ? ' · ' + loc : '')), 'cad-faint'),
+                href ? line('<a class="cad-pagelink" href="' + esc(href) + '">profile</a>', 'cad-faint') : line('No profile id on this page.', 'cad-faint'),
+                line(card.floors && card.floors.length ? esc('floors on this page: ' + card.floors.join(', ')) : 'No posts by that person are loaded.', 'cad-faint'),
+            ].join(''),
+        };
+        renderApp();
+    }
+
     async function cmdNoti() {
         panel = { title: 'noti', html: line('Loading notifications…', 'cad-faint') };
         renderApp();
@@ -1599,8 +1756,7 @@
             if (!res.ok) throw new Error('Could not load favorites (HTTP ' + res.status + ').');
             const htmlText = await decodeRes(res);
             const doc = new DOMParser().parseFromString(htmlText, 'text/html');
-            const data = extractTopics(doc, url);
-            remote = data && data.topics ? data.topics.filter(t => !t.sep).slice(0, 30) : [];
+            remote = favoriteLinks(doc).slice(0, 30);
             if (!remote.length && /\u8bf7\u5148\u767b\u5f55|\u8bf7\u767b\u5f55|not logged in/i.test(doc.body ? doc.body.textContent : ''))
                 note = 'NGA asked you to log in before listing favorites.';
         } catch (err) {
@@ -1622,6 +1778,13 @@
         else refresh(true);
     }
 
+    function cancelNoun(kind) {
+        if (kind === 'bookmark') return 'Bookmark';
+        if (kind === 'thread') return 'New thread';
+        if (kind === 'vote') return 'Vote';
+        return 'Reply';
+    }
+
     function runCmd(raw) {
         const cmd = normalizeCommand(raw);
         if (!cmd) return Promise.resolve();
@@ -1637,8 +1800,9 @@
             if (pendingReply.sending) return;
             if (m === 'y' || m === 'yes') return confirmSend();
             if (m === 'n' || m === 'no' || m === 'cancel') {
+                const noun = cancelNoun(pendingReply.kind);
                 pendingReply = null;
-                finish('reply', [line('Reply cancelled.', 'cad-faint')]);
+                finish(noun, [line(noun + ' cancelled.', 'cad-faint')]);
                 return;
             }
             if (m === 'edit') {
@@ -1695,6 +1859,7 @@
             if (!q) out = [line(esc('usage: search: <words> · search: -g <words>'), 'cad-faint')];
             else { doSearch(q, global); return; }
         }
+        else if (m === 'boards') { out = boardCmd('list'); }
         else if (m === 'board' || m.startsWith('board ')) {
             const r = boardCmd(cmd.slice(5).trim());
             if (r === null) return;
@@ -1737,21 +1902,21 @@
             const target = authorTarget(cmd.slice(6).trim(), loadedPosts(), curTid());
             if (target.error) out = [line(esc(target.error), 'cad-faint')];
             else if (target.type === 'off') {
+                store.opOnly = false;
+                opNextNo = null;
+                opEnd = false;
                 const u = new URL(location.href);
                 u.searchParams.delete('authorid');
                 location.href = u.href;
                 return;
             } else if (!curTid()) out = [line('Open a thread before filtering by author.', 'cad-faint')];
-            else { location.href = target.href; return; }
+            else {
+                store.opOnly = false;
+                location.href = target.href;
+                return;
+            }
         }
-        else if (m === 'user' || m.startsWith('user ')) {
-            const card = userCard(cmd.slice(4).trim());
-            out = [
-                line(esc(card.name + (card.uid ? ' · uid ' + card.uid : '') + (card.loc ? ' · ' + card.loc : '')), 'cad-faint'),
-                card.href ? line('<a class="cad-pagelink" href="' + esc(card.href) + '">profile</a>', 'cad-faint') : line('No profile id on this page.', 'cad-faint'),
-                line(card.floors && card.floors.length ? esc('floors on this page: ' + card.floors.join(', ')) : 'No posts by that person are loaded.', 'cad-faint'),
-            ];
-        }
+        else if (m === 'user' || m.startsWith('user ')) return cmdUser(cmd.slice(4).trim());
         else if (m === 'vote' || m.startsWith('vote ') || m === 'upvote' || m.startsWith('upvote ')) {
             const n = parseInt(cmd.replace(/^(vote|upvote)\s*/i, ''), 10);
             const post = findFloor(n);
@@ -2111,10 +2276,13 @@
         covered = false;
         store.on = !store.on;
         if (store.on) {
+            const active = document.activeElement;
+            if (active && active.blur && (!root || !root.contains(active))) active.blur();
             build();
             applyAttrs();
             setFavicon(true);
             refresh(true);
+            focusPrompt();
         } else {
             setFavicon(false);
             applyAttrs();
@@ -2174,7 +2342,7 @@
             return;
         }
         if (e.ctrlKey || e.metaKey || e.altKey) return;
-        if (e.key === 'Enter') {
+        if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             const v = el.value;
             typed = '';
@@ -2190,12 +2358,9 @@
         }
         if (e.key === 'Escape') {
             e.preventDefault();
-            if (!onEscape()) toggleCover();
-            return;
-        }
-        if (isToggleEvent(e)) {
-            e.preventDefault();
-            toggleDisguise();
+            if (pendingReply && !pendingReply.sending) pendingReply = null;
+            panel = null;
+            toggleCover();
             return;
         }
         if (e.key === 'ArrowUp') {
@@ -2348,7 +2513,10 @@
     const Img = ({ o }) => html`<img class="cad-img" src=${o.main} loading="lazy" alt="" referrerpolicy="no-referrer"
         onError=${e => { const t = e.currentTarget; if (o.alt && t.src !== o.alt) t.src = o.alt; else t.classList.add('cad-imghide'); }} />`;
     const Loc = ({ uid }) => (uid && locMap[uid]) ? html`<span> · ${locMap[uid]}</span>` : null;
-    const Quote = ({ q }) => html`<div class="cad-qline" style=${'padding-left:' + (10 + q.depth * 14) + 'px'}>${q.text}</div>`;
+    const Quote = ({ q }) => html`<div class="cad-qline" style=${'margin-left:' + ((q.depth || 0) * 12) + 'px'}>
+        ${(q.author || q.time) ? html`<div class="cad-qhead">${q.author || 'quote'}${q.time ? ' · ' + q.time : ''}</div>` : null}
+        ${q.text ? html`<div>${q.text}</div>` : null}
+    </div>`;
     const TextWithLinks = ({ text: value }) => html`${linkifySegments(value).map(seg => seg.type === 'link'
         ? html`<a class="cad-pagelink" ...${linkProps(seg.value)}>${seg.value}</a>`
         : seg.value)}`;
@@ -2357,28 +2525,37 @@
         const o = p.imgs[index];
         if (!o) return null;
         const token = p.id + ':' + index;
-        if (store.img || revealedImages.has(token)) return html`<${Img} key=${o.main} o=${o} />`;
-        return html`<button type="button" class="cad-action" onClick=${() => { revealedImages.add(token); renderApp(); }}>[image]</button>`;
+        if (store.img || revealedImages.has(token)) return html`<a href=${o.main} target="_blank" rel="noopener noreferrer"><${Img} key=${o.main} o=${o} /></a>`;
+        return html`<button type="button" class="cad-action cad-imglink" onClick=${() => { revealedImages.add(token); renderApp(); }}>[image]</button>`;
+    }
+
+    function clipState(text, maxLines) {
+        const raw = String(text || '');
+        const lines = raw.split('\n');
+        if (lines.length > maxLines) return { clipped: true, shown: lines.slice(0, maxLines).join('\n'), extra: lines.length - maxLines };
+        const limit = maxLines * 80;
+        if (raw.length > limit) return { clipped: true, shown: raw.slice(0, limit), extra: Math.max(1, Math.ceil((raw.length - limit) / 80)) };
+        return { clipped: false, shown: raw, extra: 0 };
     }
 
     const PostBody = ({ p, maxLines }) => {
         const expanded = store.expand || expandedPosts.has(p.id);
-        const lines = String(p.text || '').split('\n');
-        const clipped = !expanded && lines.length > maxLines;
-        const shown = clipped ? lines.slice(0, maxLines).join('\n') : (p.text || '');
+        const clip = clipState(p.text, maxLines);
+        const clipped = !expanded && clip.clipped;
+        const shown = clipped ? clip.shown : (p.text || '');
         const parts = shown.split(/%%IMG(\d+)%%/);
         return html`<div class="cad-text cad-line">${parts.map((part, i) => i % 2
             ? imageNode(p, +part)
             : html`<${TextWithLinks} text=${part} />`)}
-            ${lines.length > maxLines && !store.expand ? html`<button type="button" class="cad-action cad-expand" onClick=${() => {
+            ${clip.clipped && !store.expand ? html`<button type="button" class="cad-action cad-expand" onClick=${() => {
                 if (expandedPosts.has(p.id)) expandedPosts.delete(p.id); else expandedPosts.add(p.id);
                 renderApp();
-            }}>${clipped ? 'expand ' + (lines.length - maxLines) + ' more lines' : 'collapse'}</button>` : null}</div>`;
+            }}>${clipped ? 'expand ' + clip.extra + ' more lines' : 'collapse'}</button>` : null}</div>`;
     };
 
     const PostBlock = ({ p, maxLines }) => {
-        const lineCount = String(p.text || '').split('\n').length;
-        const clipped = !store.expand && !expandedPosts.has(p.id) && lineCount > maxLines;
+        const clip = clipState(p.text, maxLines);
+        const clipped = !store.expand && !expandedPosts.has(p.id) && clip.clipped;
         const tip = (p.uid ? 'uid ' + p.uid : p.name) + (p.uid && locMap[p.uid] ? ' · ' + locMap[p.uid] : '');
         return html`<article id=${'cad-floor-' + p.floor} class=${'cad-post' + (clipped ? ' cad-collapsed' : '')} onClick=${e => {
             if (!clipped) return;
@@ -2415,7 +2592,7 @@
             : null;
         // Element children only. Adjacent text nodes make Preact's diff throw in jsdom
         // ("The child can not be found in the parent") when the row gains its first board.
-        if (!boards.length) return html`<div class="cad-boards cad-line cad-faint"><span>boards: (none). </span><button type="button" class="cad-action cad-idlebtn" onClick=${() => focusInput('board fid ')}>board fid</button><span> or board add</span>${save}</div>`;
+        if (!boards.length) return save;
         return html`<div class="cad-boards cad-line cad-faint"><span>boards:</span>${boards.map((b, i) => html`<a class=${'cad-pagelink' + (String(b.fid) === String(cur) ? ' cad-boardcur' : '')} href=${'/thread.php?fid=' + encodeURIComponent(b.fid)} title=${'board ' + (i + 1)}>${b.name}</a>`)}${save}</div>`;
     };
 
@@ -2454,8 +2631,8 @@
             let tn = 0;
             return html`<div>
                 <${Welcome} cwd=${cwd} />
-                <${CmdLine} cwd=${cwd} cmd=${store.compact ? 'rg --files src/' : 'ls'} />
-                <div class="cad-kicker"><span class="cad-sect">${store.compact ? 'workspace / index' : data.board}</span> · ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics · <button type="button" class="cad-action" onClick=${() => runCmd('sort reply')}>sort reply</button> <button type="button" class="cad-action" onClick=${() => runCmd('sort post')}>sort post</button></div>
+                <${CmdLine} cwd=${cwd} cmd=${contextLine(data)} />
+                <div class="cad-kicker"><span class="cad-sect">${data.board}</span> · ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics</div>
                 ${data.topics.map(t => t.sep ? html`<${PageSep} key=${t.sep} label=${t.sep} />` : html`<${TopicRow} key=${t.href} t=${t} i=${tn++} />`)}
                 <${Pager} pager=${data.pager} />
             </div>`;
@@ -2465,7 +2642,7 @@
             return html`<div>
                 <${CmdLine} cwd=${cwd} cmd=${store.compact ? 'cat notes/review.md' : 'open "' + data.title + '"'} />
                 <h1 class="cad-title">${data.title}</h1>
-                <div class="cad-kicker">${store.compact ? 'review' : 'thread'} · ${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} posts${store.opOnly ? ' · OP only' : ''} · click a post to expand</div>
+                <div class="cad-kicker">${contextLine(data)}</div>
                 ${(!store.opOnly && data.hot && data.hot.length) ? html`<div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'highlights' : 'hot replies'}</span></div>
                     ${data.hot.map(p => html`<${PostBlock} key=${'hot-' + p.id} p=${p} maxLines=${POST_PREVIEW_LINES} />`)}` : null}
                 <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'output' : 'replies'}</span></div>
@@ -2522,12 +2699,12 @@
     const HintBar = () => {
         const hint = (name, label, run) => html`<button type="button" class="cad-action cad-hint" data-hint=${name} onClick=${run}>${label}</button>`;
         return html`<div class="cad-hints">
-            ${hint('help', 'help', () => runCmd('help'))}
-            ${hint('reply', 'reply', () => focusInput('reply '))}
-            ${hint('quote', 'quote', () => focusInput('quote '))}
-            ${hint('post', 'post', () => focusInput('post '))}
-            ${hint('search', 'search:', () => focusInput('search: '))}
-            ${hint('board', 'boards', () => runCmd('board list'))}
+            ${hint('help', '/help', () => runCmd('help'))}
+            ${hint('reply', '/reply', () => focusInput('/reply '))}
+            ${hint('quote', '/quote', () => focusInput('/quote '))}
+            ${hint('post', '/post', () => focusInput('/post '))}
+            ${hint('search', '/search', () => focusInput('/search: '))}
+            ${hint('board', '/board', () => { typed = 'board list'; if (inputEl) inputEl.value = 'board list'; runCmd('board list'); })}
             ${hint('sort', 'sort', () => focusInput('sort '))}
             ${hint('noti', 'noti', () => runCmd('noti'))}
             <span class="cad-faint">Tab completes · y confirms a post</span>
@@ -2535,6 +2712,11 @@
     };
 
     const ReplyDock = () => {
+        if (pendingReply && pendingReply.phase === 'confirm') return html`<div class="cad-modal"><div class="cad-modal-card">
+            <div class="cad-panelhead"><span>${pendingReply.kind || 'confirm'}</span><button type="button" class="cad-action" onClick=${() => runCmd('n')}>Cancel</button></div>
+            <div class="cad-panel" dangerouslySetInnerHTML=${{ __html: (panel && panel.html) || '' }} />
+            <div><button type="button" class="cad-send" onClick=${() => runCmd('y')}>Send</button> <button type="button" class="cad-action" onClick=${() => runCmd('n')}>Cancel</button> <span class="cad-dim">or y / n</span></div>
+        </div></div>`;
         if (panel) return html`<div class="cad-panel">
             <div class="cad-panelhead"><span>${panel.title}</span><button type="button" class="cad-action" onClick=${() => closePanel()}>close</button></div>
             <div dangerouslySetInnerHTML=${{ __html: panel.html }} />
@@ -2553,20 +2735,19 @@
 
     const InputBar = () => {
         const placeholder = pendingReply && pendingReply.phase === 'confirm'
-            ? 'y sends, n cancels, edit revises'
-            : 'Type a command. /help';
+            ? 'y sends, n cancels'
+            : 'Message or /command';
+        const slash = typed.trim().startsWith('/') ? CMDS.filter(c => ('/' + c).startsWith(typed.trim().toLowerCase()) || c.startsWith(typed.trim().slice(1).toLowerCase())).slice(0, 8) : [];
         return html`<div class="cad-inputbar" onClick=${() => { if (inputEl) inputEl.focus(); }}>
-            <span class="cad-ps1">➜</span>
-            <span class="cad-faint">${cwdFor(lastData || { kind: 'idle' })}</span>
-            <span class="prompt">❯</span>
-            <input class="cad-real" aria-label="Terminal command" placeholder=${placeholder} ref=${el => { inputEl = el; }} value=${typed}
+            ${slash.length ? html`<div class="cad-slash">${slash.map(c => html`<button type="button" class="cad-action cad-hint" onClick=${() => focusInput('/' + c + ' ')}>${'/' + c}</button>`)}</div>` : null}
+            <textarea class="cad-real" rows="2" aria-label="Message" placeholder=${placeholder} ref=${el => { inputEl = el; }} value=${typed}
                 spellcheck="false" autocomplete="off" autocapitalize="off"
                 onInput=${e => { typed = e.currentTarget.value; }}
                 onKeyDown=${onInputKey}
                 onCompositionEnd=${() => noteCompositionEnd()}
-                onFocus=${() => { focused = true; renderApp(); }}
-                onBlur=${() => { focused = false; renderApp(); }} />
-            ${(!focused && !typed) ? html`<span class="cad-cursor"></span>` : null}
+                onFocus=${() => { focused = true; }}
+                onBlur=${() => { focused = false; }}></textarea>
+            <button type="button" class="cad-send" onClick=${() => { const v = typed; typed = ''; if (inputEl) inputEl.value = ''; runCmd(v); }}>Send</button>
         </div>`;
     };
 
@@ -2591,22 +2772,49 @@
         </div>`;
     };
 
+    const Sidebar = () => html`<aside class="cad-side">
+        <div class="cad-brand">${store.style === 'claude' ? 'Claude' : 'Codex'}</div>
+        <div class="cad-side-label">Projects</div>
+        ${boards.length ? boards.map(b => html`<a class=${String(b.fid) === String(pageFid()) ? 'cad-onitem' : ''} href=${'/thread.php?fid=' + encodeURIComponent(b.fid)}>${b.name}</a>`) : html`<button type="button" class="cad-sideitem" onClick=${() => runCmd('board add')}>Save this board</button>`}
+        <div class="cad-side-label">Sessions</div>
+        ${(savedThreads || []).slice(0, 12).map(t => html`<a href=${'/read.php?tid=' + encodeURIComponent(t.tid)}>${t.title}</a>`)}
+    </aside>`;
+
+    const TopBar = ({ data }) => {
+        const ctx = viewBits();
+        const board = (data && data.board) || pageBoardName() || 'board';
+        const title = data && data.kind === 'posts' ? data.title : '';
+        return html`<div class="cad-topbar">
+            <span class="cad-crumb">${board}${title ? '  /  ' + title : ''}</span>
+            <span class="cad-pill">${pageLabel()}</span>
+            ${ctx.sort ? html`<button type="button" class="cad-pill" onClick=${() => runCmd(ctx.sort === 'latest post' ? 'sort reply' : 'sort post')}>${ctx.sort}</button>` : null}
+            ${ctx.filter ? html`<button type="button" class="cad-pill" onClick=${() => runCmd(store.opOnly ? 'op' : 'author off')}>${ctx.filter}</button>` : null}
+            <span style="flex:1"></span>
+            <button type="button" class="cad-action" onClick=${() => pageNav(-1)}>Prev</button>
+            <button type="button" class="cad-action" onClick=${() => pageNav(1)}>Next</button>
+            <button type="button" class="cad-action" onClick=${() => { store.mode = store.mode === 'dark' ? 'light' : 'dark'; applyAttrs(); renderApp(); }}>${store.mode}</button>
+            <button type="button" class="cad-action" onClick=${() => toggleCover()}>Esc</button>
+        </div>`;
+    };
+
     const App = () => {
         const data = lastData || { kind: 'idle' };
         return html`<div class="cad-app">
-            <div class="cad-topbar"><i></i><i></i><i></i><span class="cad-windowtitle">${FAKE_DIR} — ${store.style}</span><button type="button" class="cad-action" onClick=${() => toggleCover()}>${covered ? 'Resume' : 'Esc'}</button></div>
-            ${covered ? html`<div class="cad-cover"><div class="cad-banner"><b>${store.style === 'claude' ? '✻ Claude Code' : '› OpenAI Codex'}</b><br />${FAKE_DIR}</div><div class="cad-line cad-user">Review request handling and error paths</div><pre class="cad-cover-code">${COVER_TEXT}</pre><div class="cad-line cad-faint">Static example. It does not read a real project. Esc resumes.</div></div>` : null}
-            <div class="cad-body" id="cad__body" ref=${el => { bodyEl = el; }} onScroll=${onBodyScroll}>
-                <div class="cad-measure">
-                    <${BoardsBar} />
-                    ${store.style === 'claude' ? html`<${ClaudeView} data=${data} />` : html`<${CodexView} data=${data} />`}
-                    <${AutoLoadState} />
+            <${Sidebar} />
+            <div class="cad-main">
+                <${TopBar} data=${data} />
+                ${covered ? html`<div class="cad-cover"><div class="cad-brand">${store.style === 'claude' ? 'Claude' : 'Codex'}</div><pre class="cad-cover-code">${COVER_TEXT}</pre></div>` : null}
+                <div class="cad-body" id="cad__body" ref=${el => { bodyEl = el; }} onScroll=${onBodyScroll}>
+                    <div class="cad-measure">
+                        <${ReplyDock} />
+                        ${store.style === 'claude' ? html`<${ClaudeView} data=${data} />` : html`<${CodexView} data=${data} />`}
+                        <${AutoLoadState} />
+                    </div>
                 </div>
+                <${HintBar} />
+                <${InputBar} />
+                <${StatusBar} />
             </div>
-            <${HintBar} />
-            <${ReplyDock} />
-            <${InputBar} />
-            <${StatusBar} />
         </div>`;
     };
 
@@ -2644,6 +2852,7 @@
         if (store.on) {
             build();
             setFavicon(true);
+            focusPrompt();
         } else applyAttrs();
         if (startupGuard) clearTimeout(startupGuard);
     }
