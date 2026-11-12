@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.1.0
+
+A cleaner terminal shell, and more of the forum inside it.
+
+### Changed
+
+- Reading text sits in a 92-character column. Posts are cards: floor, author, time, recommend count, a quote bar, and an expand row. Click a collapsed post to open it.
+- A hint row above the prompt lists `help`, `reply`, `quote`, `post`, `search:`, `boards`, `sort`, and `noti`. Tab still completes.
+
+### Added
+
+- `sort reply` and `sort post` follow the board's own sort links, or `order_by=lastpostdesc` / `order_by=postdatedesc`.
+- `floor <n>` scrolls to a loaded floor, or opens the page that should contain it (20 floors per page, or the floor's pid when it is already loaded).
+- `author <uid|name>` and `author off` use NGA's `authorid` filter. `op` is still the original-poster toggle.
+- `user [uid|name]` prints the uid, location, loaded floors, and a profile link. Author names show the same tip on hover.
+- `post [title]` starts a new thread. `vote <floor>` recommends a floor. `bookmark`, `unbookmark`, and `bookmark list` save a thread. Each of those waits for `y`.
+- `noti` reads the notification link on the page, or `nuke.php?func=noti`, and lists the threads it finds.
+
 ## 3.0.0
 
 Reading and replies. The disguise is usable with the keyboard, and a reply is posted only after an explicit confirm, through the forum's own form.

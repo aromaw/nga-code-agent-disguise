@@ -310,7 +310,15 @@ test('reading: links, per-post expand, image toggle, help panel and real status'
     const panel = document.querySelector('.cad-panel');
     assert.ok(panel);
     assert.match(panel.textContent, /quote <floor>/);
+    assert.match(panel.textContent, /bookmark/);
+    assert.match(panel.textContent, /sort reply/);
+    assert.match(panel.textContent, /vote <floor>/);
     assert.equal(document.querySelector('#cad__body').textContent.includes('quote <floor>'), false);
+    document.querySelector('[data-hint="reply"]').click();
+    assert.match(document.querySelector('.cad-real').value, /^reply /);
+    const collapsed = document.querySelector('#cad-floor-2');
+    collapsed.click();
+    assert.match(document.querySelector('#cad__body').textContent, /line-15-hidden/);
 });
 
 test('the shell scrolls inside a column and the cover hides that column', async () => {
@@ -371,4 +379,71 @@ test('a timed-out next page leaves a retry instead of a permanent spinner', asyn
     [...document.querySelectorAll('button')].find(button => /Could not load the next page/.test(button.textContent)).click();
     await new Promise(resolve => realSetTimeout(resolve, 30));
     assert.equal(fetches, 2);
+});
+
+test('clicking a collapsed post expands it, and hint chips are discoverable', () => {
+    const { cad, document } = load(threadHtml, 'https://bbs.nga.cn/read.php?tid=9&page=2', { cad_on: true });
+    cad.boot();
+    const post = document.querySelector('#cad-floor-2');
+    assert.equal(post.textContent.includes('line-15-hidden'), false);
+    post.click();
+    assert.match(document.querySelector('#cad-floor-2').textContent, /line-15-hidden/);
+    document.querySelector('[data-hint="help"]').click();
+    assert.match(document.querySelector('.cad-panel').textContent, /bookmark list/);
+});
+
+test('sort, floor, author, vote, bookmark, and new thread stay behind an explicit confirm', async () => {
+    const list = load(listHtml, 'https://bbs.nga.cn/thread.php?fid=485');
+    assert.match(list.cad.sortTarget('post'), /order_by=postdatedesc/);
+    assert.match(list.cad.sortTarget('reply'), /order_by=lastpostdesc/);
+    assert.match(list.cad.sortTarget('reply'), /fid=485/);
+
+    const { cad, document, window } = load(threadHtml, 'https://bbs.nga.cn/read.php?tid=9&page=2', { cad_on: true });
+    const posts = cad.extract().posts;
+    assert.equal(cad.authorTarget('Alice', posts, '9').uid, '101');
+    assert.match(cad.authorTarget('Alice', posts, '9').href, /authorid=101/);
+    assert.equal(cad.floorTarget(41, [], '9').page, 3);
+    assert.match(cad.floorTarget(1, posts, '9').href, /pid=555/);
+    const vote = cad.buildVotePayload(posts[0], '9', '-7');
+    assert.equal(vote.fields.find(field => field.name === 'pid').value, '555');
+    assert.equal(vote.fields.find(field => field.name === '__act').value, 'recommend');
+    const mark = cad.buildBookmarkPayload({ tid: '9', fid: '-7', title: 'Test thread', remove: false });
+    assert.equal(mark.fields.find(field => field.name === '__act').value, 'add');
+
+    const calls = [];
+    window.__cadMockSubmit = async (payload) => {
+        calls.push(payload);
+        return { ok: true, message: 'ok' };
+    };
+    cad.boot();
+    await cad.runCmd('vote 1');
+    assert.equal(calls.length, 0);
+    assert.match(document.querySelector('.cad-panel').textContent, /Submit this vote/);
+    await cad.runCmd('n');
+    assert.equal(calls.length, 0);
+    await cad.runCmd('vote 1');
+    await cad.runCmd('y');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].fields.find(field => field.name === 'pid').value, '555');
+
+    await cad.runCmd('bookmark');
+    assert.equal(calls.length, 1);
+    await cad.runCmd('y');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].fields.find(field => field.name === 'tid').value, '9');
+
+    await cad.runCmd('user Alice');
+    assert.match(document.querySelector('.cad-panel').textContent, /uid 101/);
+
+    const form = new window.DOMParser().parseFromString(
+        '<form action="/post.php?action=new" method="post"><input name="action" value="new"><input name="fid" value="-7"><input name="post_subject" value=""><textarea name="post_content"></textarea><input name="token" value="abc123"></form>',
+        'text/html'
+    ).querySelector('form');
+    const thread = cad.buildThreadPayload(form, { subject: 'New topic', text: 'hello thread', fid: '-7' });
+    const fields = Object.fromEntries(thread.fields.map(field => [field.name, field.value]));
+    assert.equal(fields.action, 'new');
+    assert.equal(fields.post_subject, 'New topic');
+    assert.equal(fields.post_content, 'hello thread');
+    assert.equal(fields.token, 'abc123');
+    assert.equal(fields.fid, '-7');
 });

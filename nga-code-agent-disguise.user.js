@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NGA Code Agent Disguise
 // @namespace    https://github.com/aromaw/nga-code-agent-disguise
-// @version      3.0.0
+// @version      3.1.0
 // @description  Disguise NGA forum pages as a Claude Code / Codex CLI session. Backtick toggles outside text fields, /help lists commands, and reply/quote post through the site's own form after a confirm step.
 // @author       aromaw
 // @match        *://bbs.nga.cn/*
@@ -20,7 +20,7 @@
     'use strict';
 
     const TEST = typeof globalThis !== 'undefined' && !!globalThis.__CAD_TEST;
-    const VERSION = '3.0.0';
+    const VERSION = '3.1.0';
     const POST_PREVIEW_LINES = 14;
 
     /* ================= settings ================= */
@@ -103,7 +103,7 @@
         display:flex; flex-direction:column;
         background:var(--bg); color:var(--text);
         font-family:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,"Maple Mono NF CN","Sarasa Mono SC","Microsoft YaHei UI",monospace;
-        font-size:14px; line-height:1.58; letter-spacing:0.25px;
+        font-size:14.5px; line-height:1.65; letter-spacing:0;
     }
     #cad__root, #cad__root * { box-sizing:border-box; }
     #cad__root button { font:inherit; color:inherit; }
@@ -130,7 +130,8 @@
     .cad-welcome .sec { color:var(--accent2); font-weight:700; }
     .cad-welcome .dim { color:var(--dim); }
 
-    .cad-body { flex:1; overflow-y:auto; padding:12px 22px 16px; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+    .cad-body { flex:1; overflow-y:auto; padding:4px 0 20px; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+    .cad-measure { max-width:92ch; margin:0 auto; padding:12px 28px 8px; }
     #cad__root ::selection { background:var(--accent); color:var(--bg); }
     .cad-trow { margin:0 -22px; padding:3px 22px; font-variant-numeric:tabular-nums; display:grid; grid-template-columns:38px 62px minmax(0,1fr); column-gap:0; }
     .cad-trow:hover { background:var(--band); }
@@ -157,21 +158,32 @@
     .cad-ps1 { color:var(--green); }
     .cad-body::-webkit-scrollbar { width:10px; }
     .cad-body::-webkit-scrollbar-thumb { background:var(--border); border-radius:5px; border:2px solid var(--bg); }
-    .cad-post { position:relative; padding:5px 0 5px 18px; border-bottom:1px dashed var(--border); }
-    .cad-post:last-child { border-bottom:none; }
-    .cad-post::before { content:'●'; position:absolute; left:0; top:5px; color:var(--bullet); }
-    .cad-post .cad-posthead { color:var(--faint); font-size:12px; margin:0 0 1px; }
+    .cad-title { font-size:18px; line-height:1.35; font-weight:650; margin:8px 0 2px; letter-spacing:-0.01em; }
+    .cad-kicker { color:var(--faint); font-size:12px; margin-bottom:12px; }
+    .cad-post { position:relative; margin:0 0 12px; padding:10px 14px 12px; border:1px solid var(--border); border-radius:8px; background:color-mix(in srgb, var(--text) 3.5%, transparent); }
+    .cad-post.cad-collapsed { cursor:pointer; }
+    .cad-post.cad-collapsed:hover { border-color:var(--accent); }
+    .cad-post .cad-posthead { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; color:var(--faint); font-size:12px; margin:0 0 8px; }
+    .cad-floor { color:var(--accent); font-weight:700; min-width:2.2em; }
+    .cad-author { color:var(--text); font-weight:650; padding:0; }
+    .cad-likes { color:var(--accent2); }
     .cad-post .cad-text { color:var(--text); }
-    .cad-qline { color:var(--dim); white-space:pre-wrap; word-break:break-word; }
-    .cad-expand { display:block; font-size:12px !important; padding-left:0; margin-top:4px; }
+    .cad-qline { color:var(--dim); white-space:pre-wrap; word-break:break-word; margin:6px 0; padding:6px 10px; border-left:2px solid var(--accent); border-radius:0 6px 6px 0; background:var(--band); }
+    .cad-expand { display:flex; width:100%; margin-top:10px; padding:6px 10px; border:1px dashed var(--border); border-radius:6px; text-align:left; color:var(--accent2); }
+    .cad-expand:hover { border-color:var(--accent); color:var(--accent); }
     .cad-blocktag { display:inline-block; padding:0 8px; border-radius:4px; font-weight:700; background:var(--accent); color:var(--bg); font-size:12px; margin:6px 0 2px; }
     .cad-banner { border:1px solid var(--border); border-radius:8px; padding:8px 14px; color:var(--dim); margin-bottom:12px; font-size:12.5px; }
     .cad-banner b { color:var(--text); }
+    .cad-hints { flex-shrink:0; display:flex; flex-wrap:wrap; gap:6px; align-items:center; width:100%; box-sizing:border-box; padding:8px max(28px, calc((100% - 92ch) / 2)) 0; background:var(--bg); }
+    .cad-hint { border:1px solid var(--border); border-radius:999px; padding:2px 8px; color:var(--dim); background:transparent; }
+    .cad-hint:hover { border-color:var(--accent); color:var(--accent2); }
     .cad-inputbar {
-        flex-shrink:0; padding:10px 22px; position:relative; cursor:text;
+        flex-shrink:0; position:relative; cursor:text;
         border-top:1px solid var(--border); border-bottom:1px solid var(--border);
-        background:color-mix(in srgb, var(--text) 3%, transparent);
+        background:var(--bg);
         display:flex; align-items:center; gap:8px; color:var(--text);
+        width:100%; box-sizing:border-box;
+        padding:10px max(28px, calc((100% - 92ch) / 2));
     }
     .cad-inputbar > .cad-faint { max-width:35%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .cad-inputbar .prompt { color:var(--text); font-weight:700; }
@@ -199,7 +211,9 @@
     .cad-compose { width:100%; min-height:7em; margin:8px 0; background:var(--bg-input); color:inherit; border:1px solid var(--border); font:inherit; padding:8px; resize:vertical; }
     .cad-preview { white-space:pre-wrap; word-break:break-word; margin:8px 0; padding:8px 10px; border:1px dashed var(--border); border-radius:6px; }
     /* cad-covered is on #cad__root; the thread, prompt, and reply panel live under .cad-app. */
-    .cad-covered .cad-body, .cad-covered .cad-inputbar, .cad-covered .cad-statusbar, .cad-covered .cad-panel { display:none !important; }
+    .cad-covered .cad-body, .cad-covered .cad-inputbar, .cad-covered .cad-statusbar, .cad-covered .cad-panel, .cad-covered .cad-hints { display:none !important; }
+    .cad-statusline { margin-top:14px; padding:8px 12px; border:1px solid var(--border); border-radius:8px; }
+    .cad-statusline.cad-error { border-color:var(--accent); }
     .cad-cover { flex:1; overflow:auto; padding:24px; }
     .cad-cover-code { color:var(--dim); line-height:1.8; white-space:pre-wrap; }
     .cad-idlebtn { color:var(--link); }
@@ -207,7 +221,8 @@
     @media (max-width:760px) {
         .cad-welcome .right { display:none; }
         .cad-welcome .left { min-width:0; }
-        .cad-body { padding:8px 12px 12px; }
+        .cad-body { padding:4px 0 16px; }
+        .cad-measure, .cad-hints, .cad-inputbar { padding-left:16px; padding-right:16px; }
         .cad-user, .cad-cmd { margin-left:-12px; margin-right:-12px; padding-left:12px; padding-right:12px; }
         .cad-trow { margin:0 -12px; padding:3px 12px; }
         .cad-boards { margin:0 -12px 6px; padding:2px 12px; }
@@ -326,6 +341,7 @@
     let histIdx = -1;
     const locMap = {};
     let boards = GM_getValue('cad_boards', []);
+    let savedThreads = GM_getValue('cad_threads', []);
     const locCache = GM_getValue('cad_loc_cache', {});
     let realTitle = '';
     let origIcon = null;
@@ -602,7 +618,8 @@
             || text(b.querySelector('[id^="postauthor"]')) || uid || 'user';
         const isOP = (opUid && uid && uid === opUid) || /\u697c\u4e3b/.test(name);
         name = name.replace(/\u697c\u4e3b/g, '').replace(/^\[|\]$/g, '').replace(/^UID\s*[:：]\s*/i, '').trim() || uid || 'user';
-        const likes = text(b.querySelector('.recommendvalue'));
+        const likeEl = b.querySelector('.recommendvalue');
+        const likes = likeEl ? (text(likeEl).replace(/\D+/g, '') || '0') : '';
         const quotes = content
             ? [...content.querySelectorAll('.quote')].map(q => {
                 let depth = 0, n = q.parentElement;
@@ -624,11 +641,11 @@
             '#' + (floorM ? floorM[1] : i + 1),
             name + (uid && uid !== name ? '(' + uid + ')' : ''),
             dateM && dateM[0],
-            likes && likes !== '0' ? '+' + likes : '',
+            likes !== '' ? '+' + likes : '',
         ].filter(Boolean).join(' · ');
         const body = contentText(content);
         const id = floorM ? 'floor:' + floorM[1] + ':' + uid : [uid, dateM && dateM[0], body.text.slice(0, 40)].join('|');
-        return { id, floor, pid, head, uid, name, isOP, text: body.text, imgs: body.imgs, quotes };
+        return { id, floor, pid, head, uid, name, isOP, date: dateM && dateM[0] || '', likes, text: body.text, imgs: body.imgs, quotes };
     }
 
     function findHotBoxes(doc) {
@@ -773,40 +790,36 @@
     }
 
     /* ================= commands ================= */
-    const CMDS = ['help', 'search:', 'board', 'board list', 'board add', 'board del', 'board fid', 'next page', 'prev page', 'go page', 'open', 'ls', 'top', 'reply', 'quote', 'send', 'theme', 'claude', 'codex', 'dark', 'light', 'img', 'op', 'expand', 'vim', 'autopage', 'compact', 'pause', 'togglekey', 'clear', 'exit', 'version', 'pwd', 'whoami'];
-    const NEEDS_ARG = new Set(['search:', 'board', 'board add', 'board del', 'board fid', 'go page', 'open', 'reply', 'quote', 'togglekey']);
+    const CMDS = ['help', 'search:', 'board', 'board list', 'board add', 'board del', 'board fid', 'next page', 'prev page', 'go page', 'open', 'ls', 'top', 'floor', 'sort reply', 'sort post', 'author', 'author off', 'reply', 'quote', 'post', 'bookmark', 'bookmark list', 'unbookmark', 'vote', 'noti', 'user', 'send', 'theme', 'claude', 'codex', 'dark', 'light', 'img', 'op', 'expand', 'vim', 'autopage', 'compact', 'pause', 'togglekey', 'clear', 'exit', 'version', 'pwd', 'whoami'];
+    const NEEDS_ARG = new Set(['search:', 'board', 'board add', 'board del', 'board fid', 'go page', 'open', 'floor', 'author', 'reply', 'quote', 'post', 'vote', 'user', 'togglekey']);
 
     function helpOut() {
         return [
-            line('<b>commands</b>  <span class="cad-faint">a leading / is optional, so /help and help are the same</span>', 'cad-sect'),
-            line(esc('search: <words>       this board when a fid is known'), 'cad-dim'),
-            line(esc('search: -g <words>    the whole site'), 'cad-dim'),
-            line(esc('board list            favorites'), 'cad-dim'),
-            line(esc('board add [name]      save the fid from the URL, the reply form, or the breadcrumb'), 'cad-dim'),
-            line(esc('board <n>             open favorite n · board fid <fid> opens that board (negative fids allowed)'), 'cad-dim'),
-            line(esc('board del <n>'), 'cad-dim'),
-            line(esc('next · prev · go page <n> · top'), 'cad-dim'),
-            line(esc('ls · open <n>         list what is loaded, or open topic n'), 'cad-dim'),
-            line('<b>reply</b>', 'cad-sect'),
-            line(esc('reply                 open a multi-line composer'), 'cad-dim'),
-            line(esc('reply <text>          preview that text, then y to post'), 'cad-dim'),
-            line(esc('reply <floor> [text]  quote that #floor'), 'cad-dim'),
-            line(esc('quote <floor> [text]  same as reply <floor>'), 'cad-dim'),
-            line(esc('y / n / edit          confirm, cancel, or revise. Nothing is posted before y.'), 'cad-dim'),
+            line('<b>boards and threads</b>  <span class="cad-faint">a leading / is optional</span>', 'cad-sect'),
+            line(esc('ls · open <n>          list what is loaded, or open topic n'), 'cad-dim'),
+            line(esc('next · prev · go page <n> · top · floor <n>'), 'cad-dim'),
+            line(esc('sort reply · sort post latest reply, or latest new thread'), 'cad-dim'),
+            line(esc('search: <words>        this board when a fid is known'), 'cad-dim'),
+            line(esc('search: -g <words>     the whole site'), 'cad-dim'),
+            line(esc('op · author <uid|name> · author off'), 'cad-dim'),
+            line('<b>saved</b>', 'cad-sect'),
+            line(esc('board list · board add [name] · board <n> · board del <n> · board fid <fid>'), 'cad-dim'),
+            line(esc('bookmark · unbookmark  this thread. y confirms. bookmark list'), 'cad-dim'),
+            line('<b>write</b>', 'cad-sect'),
+            line(esc('reply [text] · reply <floor> [text] · quote <floor> [text]'), 'cad-dim'),
+            line(esc('post [title]           new thread in the current board'), 'cad-dim'),
+            line(esc('vote <floor>           recommend that floor'), 'cad-dim'),
+            line(esc('y / n / edit           nothing is posted before y. quote <floor> quotes that floor.'), 'cad-dim'),
+            line('<b>people</b>', 'cad-sect'),
+            line(esc('user [uid|name] · whoami · noti'), 'cad-dim'),
             line('<b>view</b>', 'cad-sect'),
             line(esc('img · op · expand · vim · autopage · compact · pause'), 'cad-dim'),
-            line(esc('theme · claude · codex · dark · light'), 'cad-dim'),
-            line(esc('togglekey <key>       disguise toggle. Default is ` and it is ignored in text fields and during IME. Example: togglekey f2'), 'cad-dim'),
+            line(esc('theme · claude · codex · dark · light · togglekey <key>'), 'cad-dim'),
             line('<b>keys</b>', 'cad-sect'),
-            line(esc('`                     toggle the disguise when focus is not in a text field'), 'cad-dim'),
-            line(esc('Esc                   close help or a reply draft; otherwise show the static cover'), 'cad-dim'),
-            line(esc('Ctrl+[                leave the command line'), 'cad-dim'),
-            line(esc('vim is off until you run vim. h and l scroll one screen; they do not change pages.'), 'cad-dim'),
-            line(esc('with vim on: j/k scroll · gg/G top/bottom · 5j repeats · digits then Enter open a topic'), 'cad-dim'),
-            line(esc('with vim on: / search · : command · i focus · o prefill · t theme · ? help · ctrl+o expand all'), 'cad-dim'),
-            line(esc('next and prev change pages. A page change drops posts already appended by infinite scroll.'), 'cad-dim'),
-            line('<b>other</b>', 'cad-sect'),
-            line(esc('clear · exit · version · pwd · whoami · Tab completes · up/down walk history'), 'cad-dim'),
+            line(esc('` toggles outside text fields. Esc closes help or a draft, then covers.'), 'cad-dim'),
+            line(esc('Ctrl+[ leaves the prompt. Tab completes. Click a post to expand it.'), 'cad-dim'),
+            line(esc('vim is off until you run vim. h/l scroll one screen and do not change pages.'), 'cad-dim'),
+            line(esc('clear · exit · version · pwd'), 'cad-dim'),
         ];
     }
 
@@ -875,6 +888,163 @@
         const fid = pageFid();
         if (!global && fid) u.searchParams.set('fid', fid);
         location.href = u.href;
+    }
+
+    function loadedPosts() {
+        return lastData && lastData.kind === 'posts' ? lastData.posts.filter(p => !p.sep) : [];
+    }
+
+    function sortTarget(kind, doc) {
+        doc = doc || document;
+        const replySort = kind !== 'post' && kind !== 'new';
+        const labelRe = replySort ? /\u6700\u65b0\u56de\u590d|\u6700\u540e\u56de\u590d|\u56de\u590d\u65f6\u95f4/ : /\u6700\u65b0\u53d1\u5e03|\u53d1\u5e16\u65f6\u95f4|\u53d1\u5e03\u65f6\u95f4|\u4e3b\u9898\u65f6\u95f4/;
+        const link = [...doc.querySelectorAll('a[href*="order_by"], a[href*="orderby"]')].find(a => labelRe.test(a.textContent || ''));
+        if (link) {
+            try { return new URL(link.getAttribute('href'), location.href).href; } catch (err) { /* fall through */ }
+        }
+        const u = new URL('/thread.php', location.href);
+        const fid = pageFid(doc);
+        if (fid) u.searchParams.set('fid', fid);
+        u.searchParams.set('order_by', replySort ? 'lastpostdesc' : 'postdatedesc');
+        return u.href;
+    }
+
+    function floorTarget(n, posts, tid) {
+        const perPage = 20;
+        const post = (posts || []).find(p => p.floor === n);
+        if (post && post.pid && tid) {
+            const u = new URL('/read.php', location.href);
+            u.searchParams.set('tid', tid);
+            u.searchParams.set('pid', String(post.pid));
+            return { type: 'pid', href: u.href, page: Math.floor(Math.max(0, n) / perPage) + 1 };
+        }
+        const page = Math.floor(Math.max(0, n) / perPage) + 1;
+        const u = new URL('/read.php', location.href);
+        if (tid) u.searchParams.set('tid', tid);
+        u.searchParams.set('page', String(page));
+        return { type: 'page', href: u.href, page };
+    }
+
+    function authorTarget(token, posts, tid) {
+        const raw = String(token || '').trim();
+        if (!raw || raw === 'off' || raw === 'clear') return { type: 'off' };
+        let uid = /^\d+$/.test(raw) ? raw : '';
+        let name = '';
+        if (!uid) {
+            const hit = (posts || []).find(p => p.name && p.name.toLowerCase() === raw.toLowerCase());
+            if (!hit || !hit.uid) return { error: 'No uid for that name in the loaded posts. Use author <uid>.' };
+            uid = hit.uid;
+            name = hit.name;
+        }
+        const u = new URL('/read.php', location.href);
+        if (tid) u.searchParams.set('tid', tid);
+        u.searchParams.set('authorid', uid);
+        u.searchParams.delete('page');
+        return { type: 'author', uid, name, href: u.href };
+    }
+
+    function userCard(token) {
+        const raw = String(token || '').trim();
+        const posts = loadedPosts();
+        let uid = /^\d+$/.test(raw) ? raw : '';
+        let name = '';
+        if (!raw) {
+            name = currentUser();
+            return { name: name || 'reader', uid: '', loc: '', floors: [] };
+        }
+        if (!uid) {
+            const hit = posts.find(p => p.name && p.name.toLowerCase() === raw.toLowerCase());
+            if (hit) { uid = hit.uid; name = hit.name; }
+        }
+        const mine = posts.filter(p => (uid && p.uid === uid) || (name && p.name === name));
+        if (!name && mine[0]) name = mine[0].name;
+        const loc = uid && locMap[uid] ? locMap[uid] : '';
+        return {
+            name: name || raw,
+            uid,
+            loc,
+            floors: mine.map(p => p.floor),
+            href: uid ? new URL('/nuke.php?func=ucp&uid=' + encodeURIComponent(uid), location.href).href : '',
+        };
+    }
+
+    function buildVotePayload(post, tid, fid) {
+        if (!post || !post.pid) return { error: 'That floor has no pid, so it cannot be recommended.' };
+        const link = document.querySelector('a[href*="recommend"][href*="' + post.pid + '"], a[href*="post_recommend"]');
+        const href = link && link.getAttribute('href') && !/^javascript:/i.test(link.getAttribute('href')) ? link.getAttribute('href') : '';
+        return {
+            action: href || '/nuke.php?__output=11',
+            method: 'POST',
+            acceptCharset: 'UTF-8',
+            fields: [
+                { name: '__lib', value: 'post_recommend' },
+                { name: '__act', value: 'recommend' },
+                { name: '__output', value: '11' },
+                { name: 'pid', value: String(post.pid) },
+                { name: 'tid', value: String(tid || '') },
+                { name: 'fid', value: String(fid || '') },
+                { name: 'value', value: '1' },
+            ],
+            body: 'Upvote #' + post.floor + ' ' + (post.name || '') + ' pid=' + post.pid + ' current +' + (post.likes === '' ? '0' : post.likes),
+        };
+    }
+
+    function buildBookmarkPayload(opts) {
+        opts = opts || {};
+        const remove = !!opts.remove;
+        const link = [...document.querySelectorAll('a[href*="topic_favor"], a[href*="favor"]')].find(a => {
+            const href = a.getAttribute('href') || '';
+            return href && !/^javascript:/i.test(href);
+        });
+        return {
+            action: (link && link.getAttribute('href')) || '/nuke.php?__output=11',
+            method: 'POST',
+            acceptCharset: 'UTF-8',
+            fields: [
+                { name: '__lib', value: 'topic_favor' },
+                { name: '__act', value: remove ? 'del' : 'add' },
+                { name: '__output', value: '11' },
+                { name: 'tid', value: String(opts.tid || '') },
+                { name: 'fid', value: String(opts.fid || '') },
+            ],
+            body: (remove ? 'Remove bookmark' : 'Bookmark thread') + ' tid=' + (opts.tid || '') + (opts.title ? ' ' + opts.title : ''),
+        };
+    }
+
+    function rememberThread(entry, remove) {
+        const tid = String(entry.tid || '');
+        if (!tid) return;
+        savedThreads = (savedThreads || []).filter(t => String(t.tid) !== tid);
+        if (!remove) savedThreads.unshift({ tid, fid: String(entry.fid || ''), title: entry.title || ('tid ' + tid) });
+        if (savedThreads.length > 200) savedThreads.length = 200;
+        GM_setValue('cad_threads', savedThreads);
+    }
+
+    function buildThreadPayload(form, opts) {
+        opts = opts || {};
+        const fields = formFields(form);
+        const contentName = contentFieldName(form);
+        if (!contentName) return { error: 'This new-thread form has no content field.' };
+        if (!String(opts.subject || '').trim()) return { error: 'A new thread needs a title.' };
+        if (!String(opts.text || '').trim()) return { error: 'Write the thread body first.' };
+        fields.forEach(f => { if (f.name === contentName) f.value = opts.text; });
+        const subjectName = ['post_subject', 'subject', 'title'].find(n => fields.some(f => f.name === n)) || 'post_subject';
+        const subject = fields.find(f => f.name === subjectName);
+        if (subject) subject.value = opts.subject;
+        else fields.push({ name: subjectName, value: opts.subject });
+        const actionField = fields.find(f => f.name === 'action');
+        if (actionField) actionField.value = 'new';
+        else fields.push({ name: 'action', value: 'new' });
+        ensureField(fields, 'fid', opts.fid || pageFid());
+        ensureField(fields, 'step', '2');
+        return {
+            action: form.getAttribute('action') || '/post.php?action=new',
+            method: (form.getAttribute('method') || 'POST').toUpperCase(),
+            acceptCharset: form.getAttribute('accept-charset') || 'GBK',
+            fields,
+            contentName,
+            body: opts.subject + '\n\n' + opts.text,
+        };
     }
 
     function opModeOn() {
@@ -1129,13 +1299,13 @@
         } : (opts.quote || null);
         const replyText = opts.text || '';
         if (opts.compose || !String(replyText).trim()) {
-            pendingReply = { phase: 'compose', quote, text: replyText, sending: false };
+            pendingReply = { phase: 'compose', kind: 'reply', quote, text: replyText, sending: false };
             composeText = replyText;
             panel = null;
             if (root) renderApp();
             return;
         }
-        pendingReply = { phase: 'confirm', quote, text: replyText, sending: false };
+        pendingReply = { phase: 'confirm', kind: 'reply', quote, text: replyText, sending: false };
         panel = { title: 'reply', html: confirmHtml(replyBody(pendingReply)) };
         if (root) renderApp();
     }
@@ -1151,6 +1321,33 @@
             return;
         }
         beginReply({ post: parsed.post || null, text: parsed.text || '', compose: !String(parsed.text || '').trim() });
+    }
+
+    async function loadNewThreadForm() {
+        const live = [...document.querySelectorAll('form')].find(f => {
+            const action = ((f.getAttribute('action') || '') + ' ' + (f.querySelector('input[name="action"]') || {}).value).toLowerCase();
+            return action.includes('new') && contentFieldName(f);
+        });
+        if (live) return live;
+        const fid = pageFid();
+        if (!fid) throw new Error('Open a board before posting a new thread. board fid <fid> goes there.');
+        const url = new URL('/post.php', location.href);
+        url.searchParams.set('action', 'new');
+        url.searchParams.set('fid', fid);
+        let res;
+        try { res = await fetch(url.href, { credentials: 'include' }); }
+        catch (err) { throw new Error('Could not load the new-thread form.'); }
+        if (!res.ok) throw new Error('Could not load the new-thread form (HTTP ' + res.status + ').');
+        const htmlText = await decodeRes(res);
+        const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+        const form = findReplyForm(doc);
+        if (!form || !contentFieldName(form)) {
+            const bodyText = doc.body ? doc.body.textContent : '';
+            if (/\u8bf7\u5148\u767b\u5f55|\u5c1a\u672a\u767b\u5f55|\u8bf7\u767b\u5f55|not logged in/i.test(bodyText))
+                throw new Error('NGA says you are not logged in. Sign in on the site, then retry.');
+            throw new Error('NGA did not return a new-thread form.');
+        }
+        return form;
     }
 
     async function loadReplyForm() {
@@ -1253,18 +1450,28 @@
         if (!pendingReply || pendingReply.phase !== 'confirm' || pendingReply.sending) return;
         pendingReply.sending = true;
         const snapshot = pendingReply;
-        panel = { title: 'reply', html: line('Sending…', 'cad-faint') };
+        const title = snapshot.kind || 'reply';
+        panel = { title, html: line('Sending…', 'cad-faint') };
         renderApp();
         try {
-            const form = await loadReplyForm();
-            const payload = buildReplyPayload(form, {
-                text: snapshot.text,
-                quote: snapshot.quote,
-                tid: curTid(),
-                fid: pageFid(),
-            });
+            let payload;
+            if (snapshot.kind === 'vote') payload = buildVotePayload(snapshot.post, curTid(), pageFid());
+            else if (snapshot.kind === 'bookmark') payload = buildBookmarkPayload(snapshot);
+            else if (snapshot.kind === 'thread') {
+                const form = await loadNewThreadForm();
+                payload = buildThreadPayload(form, { subject: snapshot.subject, text: snapshot.text, fid: pageFid() });
+            } else {
+                const form = await loadReplyForm();
+                payload = buildReplyPayload(form, {
+                    text: snapshot.text,
+                    quote: snapshot.quote,
+                    tid: curTid(),
+                    fid: pageFid(),
+                });
+            }
             if (payload.error) throw new Error(payload.error);
             const result = await submitReplyPayload(payload);
+            if (result.ok && snapshot.kind === 'bookmark') rememberThread(snapshot, snapshot.remove);
             if (!result.ok) {
                 snapshot.sending = false;
                 pendingReply = snapshot;
@@ -1288,6 +1495,22 @@
     function previewCompose() {
         if (!pendingReply || pendingReply.phase !== 'compose') return;
         pendingReply.text = composeText;
+        if (pendingReply.kind === 'thread') {
+            if (!String(pendingReply.subject || '').trim() || !String(composeText || '').trim()) {
+                finish('post', [line('A new thread needs a title and a body. post <title>, then preview.', 'cad-faint')]);
+                return;
+            }
+            pendingReply.phase = 'confirm';
+            pendingReply.sending = false;
+            panel = {
+                title: 'post',
+                html: line(esc(pendingReply.subject), 'cad-faint')
+                    + '<pre class="cad-preview">' + esc(composeText) + '</pre>'
+                    + line('Submit this new thread? <b>y</b> sends it, <b>n</b> cancels, <b>edit</b> revises.', 'cad-faint'),
+            };
+            renderApp();
+            return;
+        }
         const empty = !String(composeText || '').trim() && !(pendingReply.quote && (pendingReply.quote.text || pendingReply.quote.pid));
         if (empty) {
             finish('reply', [line('Write a reply first.', 'cad-faint')]);
@@ -1296,6 +1519,73 @@
         pendingReply.phase = 'confirm';
         pendingReply.sending = false;
         panel = { title: 'reply', html: confirmHtml(replyBody(pendingReply)) };
+        renderApp();
+    }
+
+    async function loadNoti() {
+        const link = document.querySelector('a[href*="func=noti"], a[href*="__lib=noti"], a[href*="action=noti"]');
+        const url = link ? new URL(link.getAttribute('href'), location.href).href : new URL('/nuke.php?func=noti', location.href).href;
+        const res = await fetch(url, { credentials: 'include' });
+        if (!res.ok) throw new Error('Could not load notifications (HTTP ' + res.status + ').');
+        const htmlText = await decodeRes(res);
+        const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+        const rows = [];
+        const seen = new Set();
+        [...doc.querySelectorAll('a[href*="read.php"], a[href*="tid="]')].forEach(a => {
+            const title = text(a);
+            const href = a.getAttribute('href') || '';
+            if (!title || title.length < 2 || seen.has(href)) return;
+            seen.add(href);
+            let abs = href;
+            try { abs = new URL(href, url).href; } catch (err) { abs = href; }
+            rows.push({ title, href: abs });
+        });
+        const login = /\u8bf7\u5148\u767b\u5f55|\u5c1a\u672a\u767b\u5f55|\u8bf7\u767b\u5f55|not logged in/i.test(doc.body ? doc.body.textContent : '');
+        return { rows: rows.slice(0, 20), url, login };
+    }
+
+    async function cmdNoti() {
+        panel = { title: 'noti', html: line('Loading notifications…', 'cad-faint') };
+        renderApp();
+        try {
+            const data = await loadNoti();
+            const lines = [line(esc('Source: ' + data.url), 'cad-faint')];
+            if (data.login && !data.rows.length) lines.push(line('NGA says you are not logged in. Sign in on the site, then retry.', ''));
+            else if (!data.rows.length) lines.push(line('No notification links were found on that page.', 'cad-faint'));
+            data.rows.forEach(r => lines.push(line('<a class="cad-pagelink" href="' + esc(r.href) + '">' + esc(r.title) + '</a>')));
+            panel = { title: 'noti', html: lines.join('') };
+        } catch (err) {
+            panel = { title: 'noti', html: line(esc(err && err.message ? err.message : String(err)), '') };
+        }
+        renderApp();
+    }
+
+    async function cmdBookmarkList() {
+        const local = (savedThreads || []).map(t => line('<a class="cad-pagelink" href="/read.php?tid=' + encodeURIComponent(t.tid) + '">' + esc(t.title) + '</a> <span class="cad-faint">tid=' + esc(String(t.tid)) + '</span>'));
+        panel = { title: 'bookmark', html: line('Loading NGA favorites…', 'cad-faint') };
+        renderApp();
+        let remote = [];
+        let note = '';
+        try {
+            const url = new URL('/thread.php?favor=1', location.href).href;
+            const res = await fetch(url, { credentials: 'include' });
+            if (!res.ok) throw new Error('Could not load favorites (HTTP ' + res.status + ').');
+            const htmlText = await decodeRes(res);
+            const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+            const data = extractTopics(doc, url);
+            remote = data && data.topics ? data.topics.filter(t => !t.sep).slice(0, 30) : [];
+            if (!remote.length && /\u8bf7\u5148\u767b\u5f55|\u8bf7\u767b\u5f55|not logged in/i.test(doc.body ? doc.body.textContent : ''))
+                note = 'NGA asked you to log in before listing favorites.';
+        } catch (err) {
+            note = err && err.message ? err.message : String(err);
+        }
+        const lines = [line('<b>saved in this browser</b>', 'cad-sect')];
+        lines.push.apply(lines, local.length ? local : [line('None yet. bookmark on a thread, then y.', 'cad-faint')]);
+        lines.push(line('<b>NGA favorite list</b>', 'cad-sect'));
+        if (note) lines.push(line(esc(note), 'cad-faint'));
+        remote.forEach((t, i) => lines.push(line('<span class="cad-topicnum">' + (i + 1) + '</span> <a class="cad-pagelink" href="' + esc(t.href) + '">' + esc(t.title) + '</a>')));
+        if (!remote.length && !note) lines.push(line('The favorite page returned no topics.', 'cad-faint'));
+        panel = { title: 'bookmark', html: lines.join('') };
         renderApp();
     }
 
@@ -1389,6 +1679,80 @@
         else if (m === 'top') { if (bodyEl) bodyEl.scrollTop = 0; return; }
         else if (m === 'reply' || m.startsWith('reply ')) { cmdReply(cmd.slice(5).trim(), 'reply'); return; }
         else if (m === 'quote' || m.startsWith('quote ')) { cmdReply(cmd.slice(5).trim(), 'quote'); return; }
+        else if (m === 'post' || m.startsWith('post ') || m === 'new' || m.startsWith('new ')) {
+            const subject = cmd.replace(/^(post|new)\s*/i, '').trim();
+            pendingReply = { phase: 'compose', kind: 'thread', subject, text: '', quote: null, sending: false };
+            composeText = '';
+            panel = null;
+            renderApp();
+            return;
+        }
+        else if (m === 'floor' || m.startsWith('floor ')) {
+            const n = parseInt(cmd.replace(/^floor\s*/i, ''), 10);
+            if (!Number.isFinite(n)) { out = [line(esc('usage: floor <n>'), 'cad-faint')]; }
+            else if (!curTid()) { out = [line('Open a thread before jumping to a floor.', 'cad-faint')]; }
+            else {
+                const el = document.getElementById('cad-floor-' + n);
+                if (el) {
+                    try { el.scrollIntoView({ block: 'start' }); } catch (err) { if (bodyEl) bodyEl.scrollTop = el.offsetTop || 0; }
+                    out = [line('Floor #' + n + ' is on this page.', 'cad-faint')];
+                } else {
+                    location.href = floorTarget(n, loadedPosts(), curTid()).href;
+                    return;
+                }
+            }
+        }
+        else if (m === 'sort reply' || m === 'sort post' || m === 'sort new' || m === 'sort') {
+            if (m === 'sort') out = [line(esc('usage: sort reply · sort post'), 'cad-faint')];
+            else { location.href = sortTarget(m === 'sort post' || m === 'sort new' ? 'post' : 'reply'); return; }
+        }
+        else if (m === 'author' || m.startsWith('author ')) {
+            const target = authorTarget(cmd.slice(6).trim(), loadedPosts(), curTid());
+            if (target.error) out = [line(esc(target.error), 'cad-faint')];
+            else if (target.type === 'off') {
+                const u = new URL(location.href);
+                u.searchParams.delete('authorid');
+                location.href = u.href;
+                return;
+            } else if (!curTid()) out = [line('Open a thread before filtering by author.', 'cad-faint')];
+            else { location.href = target.href; return; }
+        }
+        else if (m === 'user' || m.startsWith('user ')) {
+            const card = userCard(cmd.slice(4).trim());
+            out = [
+                line(esc(card.name + (card.uid ? ' · uid ' + card.uid : '') + (card.loc ? ' · ' + card.loc : '')), 'cad-faint'),
+                card.href ? line('<a class="cad-pagelink" href="' + esc(card.href) + '">profile</a>', 'cad-faint') : line('No profile id on this page.', 'cad-faint'),
+                line(card.floors && card.floors.length ? esc('floors on this page: ' + card.floors.join(', ')) : 'No posts by that person are loaded.', 'cad-faint'),
+            ];
+        }
+        else if (m === 'vote' || m.startsWith('vote ') || m === 'upvote' || m.startsWith('upvote ')) {
+            const n = parseInt(cmd.replace(/^(vote|upvote)\s*/i, ''), 10);
+            const post = findFloor(n);
+            if (!post) out = [line(esc('usage: vote <floor>'), 'cad-faint')];
+            else {
+                const payload = buildVotePayload(post, curTid(), pageFid());
+                if (payload.error) out = [line(esc(payload.error), 'cad-faint')];
+                else {
+                    pendingReply = { phase: 'confirm', kind: 'vote', post, text: '', sending: false };
+                    panel = { title: 'vote', html: line(esc(payload.body), 'cad-faint') + line('Submit this vote? <b>y</b> sends it, <b>n</b> cancels.', 'cad-faint') };
+                    renderApp();
+                    return;
+                }
+            }
+        }
+        else if (m === 'bookmark list' || m === 'fav list' || m === 'favorites') return cmdBookmarkList();
+        else if (m === 'bookmark' || m === 'fav' || m === 'unbookmark' || m === 'unfav') {
+            if (!curTid()) out = [line('Open a thread to bookmark it.', 'cad-faint')];
+            else {
+                const remove = m === 'unbookmark' || m === 'unfav';
+                const payload = buildBookmarkPayload({ tid: curTid(), fid: pageFid(), title: lastData && lastData.title, remove });
+                pendingReply = { phase: 'confirm', kind: 'bookmark', tid: curTid(), fid: pageFid(), title: lastData && lastData.title, remove, text: '', sending: false };
+                panel = { title: 'bookmark', html: line(esc(payload.body), 'cad-faint') + line('Submit this bookmark? <b>y</b> sends it, <b>n</b> cancels.', 'cad-faint') };
+                renderApp();
+                return;
+            }
+        }
+        else if (m === 'noti' || m === 'notifications' || m === 'inbox') return cmdNoti();
         else if (m === 'theme' || m === 't') {
             cycleTheme();
             out = [line('theme → ' + store.style + ' ' + store.mode, 'cad-faint')];
@@ -1957,7 +2321,7 @@
     const Img = ({ o }) => html`<img class="cad-img" src=${o.main} loading="lazy" alt="" referrerpolicy="no-referrer"
         onError=${e => { const t = e.currentTarget; if (o.alt && t.src !== o.alt) t.src = o.alt; else t.classList.add('cad-imghide'); }} />`;
     const Loc = ({ uid }) => (uid && locMap[uid]) ? html`<span> · ${locMap[uid]}</span>` : null;
-    const Quote = ({ q }) => html`<div class="cad-qline" style=${'margin-left:' + (q.depth * 14) + 'px'}>▎${q.text}</div>`;
+    const Quote = ({ q }) => html`<div class="cad-qline" style=${'padding-left:' + (10 + q.depth * 14) + 'px'}>${q.text}</div>`;
     const TextWithLinks = ({ text: value }) => html`${linkifySegments(value).map(seg => seg.type === 'link'
         ? html`<a class="cad-pagelink" ...${linkProps(seg.value)}>${seg.value}</a>`
         : seg.value)}`;
@@ -1982,16 +2346,33 @@
             ${lines.length > maxLines && !store.expand ? html`<button type="button" class="cad-action cad-expand" onClick=${() => {
                 if (expandedPosts.has(p.id)) expandedPosts.delete(p.id); else expandedPosts.add(p.id);
                 renderApp();
-            }}>${clipped ? '… +' + (lines.length - maxLines) + ' lines · expand' : '− collapse'}</button>` : null}</div>`;
+            }}>${clipped ? 'expand ' + (lines.length - maxLines) + ' more lines' : 'collapse'}</button>` : null}</div>`;
     };
 
-    const PostBlock = ({ p, maxLines }) => html`<div class="cad-post">
-        <div class="cad-posthead">${p.head}${p.isOP ? html` <span class="cad-op">OP</span>` : ''}<${Loc} uid=${p.uid} />
-            ${p.sep ? null : html` <button type="button" class="cad-action" onClick=${() => beginReply({ post: p, text: '', compose: true })}>quote</button>`}
-        </div>
-        ${(p.quotes || []).map(q => html`<${Quote} q=${q} />`)}
-        <${PostBody} p=${p} maxLines=${maxLines} />
-    </div>`;
+    const PostBlock = ({ p, maxLines }) => {
+        const lineCount = String(p.text || '').split('\n').length;
+        const clipped = !store.expand && !expandedPosts.has(p.id) && lineCount > maxLines;
+        const tip = (p.uid ? 'uid ' + p.uid : p.name) + (p.uid && locMap[p.uid] ? ' · ' + locMap[p.uid] : '');
+        return html`<article id=${'cad-floor-' + p.floor} class=${'cad-post' + (clipped ? ' cad-collapsed' : '')} onClick=${e => {
+            if (!clipped) return;
+            const t = e.target;
+            if (t && t.closest && t.closest('a, button, textarea, input')) return;
+            if (expandedPosts.has(p.id)) expandedPosts.delete(p.id); else expandedPosts.add(p.id);
+            renderApp();
+        }}>
+            <header class="cad-posthead">
+                <span class="cad-floor">#${p.floor}</span>
+                <button type="button" class="cad-action cad-author" title=${tip} onClick=${() => runCmd('user ' + (p.uid || p.name))}>${p.name}</button>
+                ${p.isOP ? html`<span class="cad-op">OP</span>` : null}
+                ${p.date ? html`<span>${p.date}</span>` : null}
+                ${p.likes !== '' ? html`<span class="cad-likes">+${p.likes}</span>` : null}
+                <${Loc} uid=${p.uid} />
+                <button type="button" class="cad-action" onClick=${() => beginReply({ post: p, text: '', compose: true })}>quote</button>
+            </header>
+            ${(p.quotes || []).map(q => html`<${Quote} q=${q} />`)}
+            <${PostBody} p=${p} maxLines=${maxLines} />
+        </article>`;
+    };
 
     const Pager = ({ pager }) => (pager && pager.length) ? html`<div class="cad-line" style="margin-top:8px"><span class="cad-sect">pages</span>${pager.map(l => html` <a class="cad-pagelink" href=${l.href}>${l.t}</a>`)}</div>` : null;
     const PageSep = ({ label }) => html`<div class="cad-pagesep">${label}</div>`;
@@ -2047,7 +2428,7 @@
             return html`<div>
                 <${Welcome} cwd=${cwd} />
                 <${CmdLine} cwd=${cwd} cmd=${store.compact ? 'rg --files src/' : 'ls'} />
-                <div class="cad-line"><span class="cad-sect">${store.compact ? 'workspace / index' : data.board}</span> <span class="cad-faint">· ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics</span></div>
+                <div class="cad-kicker"><span class="cad-sect">${store.compact ? 'workspace / index' : data.board}</span> · ${data.topics.reduce((a, t) => a + (t.sep ? 0 : 1), 0)} topics · <button type="button" class="cad-action" onClick=${() => runCmd('sort reply')}>sort reply</button> <button type="button" class="cad-action" onClick=${() => runCmd('sort post')}>sort post</button></div>
                 ${data.topics.map(t => t.sep ? html`<${PageSep} key=${t.sep} label=${t.sep} />` : html`<${TopicRow} key=${t.href} t=${t} i=${tn++} />`)}
                 <${Pager} pager=${data.pager} />
             </div>`;
@@ -2056,13 +2437,14 @@
             const visible = store.opOnly ? data.posts.filter(p => p.isOP || p.sep) : data.posts;
             return html`<div>
                 <${CmdLine} cwd=${cwd} cmd=${store.compact ? 'cat notes/review.md' : 'open "' + data.title + '"'} />
-                <div class="cad-line cad-faint">${store.compact ? 'review' : 'thread'}: ${data.title} · ${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} posts${store.opOnly ? ' · OP only' : ''}</div>
+                <h1 class="cad-title">${data.title}</h1>
+                <div class="cad-kicker">${store.compact ? 'review' : 'thread'} · ${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} posts${store.opOnly ? ' · OP only' : ''} · click a post to expand</div>
                 ${(!store.opOnly && data.hot && data.hot.length) ? html`<div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'highlights' : 'hot replies'}</span></div>
                     ${data.hot.map(p => html`<${PostBlock} key=${'hot-' + p.id} p=${p} maxLines=${POST_PREVIEW_LINES} />`)}` : null}
                 <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'output' : 'replies'}</span></div>
                 ${visible.map(p => p.sep ? html`<${PageSep} key=${p.sep} label=${p.sep} />` : html`<${PostBlock} key=${p.id} p=${p} maxLines=${POST_PREVIEW_LINES} />`)}
                 <${Pager} pager=${data.pager} />
-                <div class="cad-line cad-faint" style="margin-top:8px">Each post expands on its own. ctrl+o ${store.expand ? 'collapses' : 'expands'} all. reply / quote post through this page's form.</div>
+                <div class="cad-kicker">ctrl+o ${store.expand ? 'collapses' : 'expands'} every post. reply, quote, post, and vote wait for y.</div>
             </div>`;
         }
         return html`<${IdleView} />`;
@@ -2089,7 +2471,8 @@
                 <div class="cad-blocktag">user</div>
                 <div class="cad-line">${store.compact ? 'Read notes/review.md' : 'Open thread ' + data.title}</div>
                 <div class="cad-blocktag">codex</div>
-                <div class="cad-line cad-faint">${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} posts${store.opOnly ? ' · OP only' : ''} · cwd: ${cwd}</div>
+                <h1 class="cad-title">${data.title}</h1>
+                <div class="cad-kicker">${data.posts.reduce((a, p) => a + (p.sep ? 0 : 1), 0)} posts${store.opOnly ? ' · OP only' : ''} · cwd: ${cwd}</div>
                 ${(!store.opOnly && data.hot && data.hot.length) ? html`<div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'highlights' : 'hot replies'}</span></div>
                     ${data.hot.map(p => html`<${PostBlock} key=${'hot-' + p.id} p=${p} maxLines=${POST_PREVIEW_LINES} />`)}` : null}
                 <div class="cad-line" style="margin-top:6px"><span class="cad-sect">${store.compact ? 'output' : 'replies'}</span></div>
@@ -2101,12 +2484,27 @@
     };
 
     const AutoLoadState = () => {
-        if (autoPageLoading) return html`<div class="cad-line cad-faint" style="margin-top:6px">Loading the next page…</div>`;
-        if (autoPageError) return html`<div class="cad-line" style="margin-top:6px"><button type="button" class="cad-action cad-idlebtn" onClick=${() => loadNextPage()}>Could not load the next page. Retry</button></div>`;
+        if (autoPageLoading) return html`<div class="cad-statusline cad-faint" role="status">Loading the next page…</div>`;
+        if (autoPageError) return html`<div class="cad-statusline cad-error" role="alert"><button type="button" class="cad-action cad-idlebtn" onClick=${() => loadNextPage()}>Could not load the next page. Retry</button></div>`;
         const list = lastData && (lastData.posts || lastData.topics);
         if (store.autopage && (opModeOn() ? opEnd : !nextPageUrl) && list && list.some(x => x.sep))
-            return html`<div class="cad-line cad-faint" style="margin-top:6px">End of pages</div>`;
+            return html`<div class="cad-statusline cad-faint">End of pages</div>`;
         return null;
+    };
+
+    const HintBar = () => {
+        const hint = (name, label, run) => html`<button type="button" class="cad-action cad-hint" data-hint=${name} onClick=${run}>${label}</button>`;
+        return html`<div class="cad-hints">
+            ${hint('help', 'help', () => runCmd('help'))}
+            ${hint('reply', 'reply', () => focusInput('reply '))}
+            ${hint('quote', 'quote', () => focusInput('quote '))}
+            ${hint('post', 'post', () => focusInput('post '))}
+            ${hint('search', 'search:', () => focusInput('search: '))}
+            ${hint('board', 'boards', () => runCmd('board list'))}
+            ${hint('sort', 'sort', () => focusInput('sort '))}
+            ${hint('noti', 'noti', () => runCmd('noti'))}
+            <span class="cad-faint">Tab completes · y confirms a post</span>
+        </div>`;
     };
 
     const ReplyDock = () => {
@@ -2115,7 +2513,8 @@
             <div dangerouslySetInnerHTML=${{ __html: panel.html }} />
         </div>`;
         if (pendingReply && pendingReply.phase === 'compose') return html`<div class="cad-panel">
-            <div class="cad-panelhead"><span>${pendingReply.quote ? 'quote #' + pendingReply.quote.floor : 'reply'}</span><button type="button" class="cad-action" onClick=${() => { pendingReply = null; composeText = ''; renderApp(); }}>cancel</button></div>
+            <div class="cad-panelhead"><span>${pendingReply.kind === 'thread' ? 'new thread' : (pendingReply.quote ? 'quote #' + pendingReply.quote.floor : 'reply')}</span><button type="button" class="cad-action" onClick=${() => { pendingReply = null; composeText = ''; renderApp(); }}>cancel</button></div>
+            ${pendingReply.kind === 'thread' ? html`<input class="cad-compose" style="min-height:0" aria-label="Thread title" placeholder="Title" value=${pendingReply.subject || ''} onInput=${e => { if (pendingReply) pendingReply.subject = e.currentTarget.value; }} />` : null}
             <div class="cad-faint">${pendingReply.quote ? 'Quote is included when you preview. ' : ''}Enter inserts a newline. Nothing is posted from here.</div>
             <textarea class="cad-compose" value=${composeText}
                 onInput=${e => { composeText = e.currentTarget.value; if (pendingReply) pendingReply.text = composeText; }}
@@ -2171,10 +2570,13 @@
             <div class="cad-topbar"><i></i><i></i><i></i><span class="cad-windowtitle">${FAKE_DIR} — ${store.style}</span><button type="button" class="cad-action" onClick=${() => toggleCover()}>${covered ? 'Resume' : 'Esc'}</button></div>
             ${covered ? html`<div class="cad-cover"><div class="cad-banner"><b>${store.style === 'claude' ? '✻ Claude Code' : '› OpenAI Codex'}</b><br />${FAKE_DIR}</div><div class="cad-line cad-user">Review request handling and error paths</div><pre class="cad-cover-code">${COVER_TEXT}</pre><div class="cad-line cad-faint">Static example. It does not read a real project. Esc resumes.</div></div>` : null}
             <div class="cad-body" id="cad__body" ref=${el => { bodyEl = el; }} onScroll=${onBodyScroll}>
-                <${BoardsBar} />
-                ${store.style === 'claude' ? html`<${ClaudeView} data=${data} />` : html`<${CodexView} data=${data} />`}
-                <${AutoLoadState} />
+                <div class="cad-measure">
+                    <${BoardsBar} />
+                    ${store.style === 'claude' ? html`<${ClaudeView} data=${data} />` : html`<${CodexView} data=${data} />`}
+                    <${AutoLoadState} />
+                </div>
             </div>
+            <${HintBar} />
             <${ReplyDock} />
             <${InputBar} />
             <${StatusBar} />
@@ -2256,6 +2658,13 @@
             resolveBoardOp,
             linkifySegments,
             findFloor,
+            sortTarget,
+            floorTarget,
+            authorTarget,
+            userCard,
+            buildVotePayload,
+            buildBookmarkPayload,
+            buildThreadPayload,
             getPanel: () => panel,
             getPending: () => pendingReply,
         };

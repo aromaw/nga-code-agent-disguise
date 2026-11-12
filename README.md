@@ -2,88 +2,74 @@
 
 # NGA Code Agent Disguise
 
-A Tampermonkey script that shows NGA forum pages (`bbs.nga.cn`, `ngabbs.com`, `bbs.ngacn.cc`, `nga.178.com`) as a Claude Code / Codex CLI session. The rendering layer is Preact and htm, inlined, with no network dependency of its own.
+A Tampermonkey script that shows NGA (`bbs.nga.cn`, `ngabbs.com`, `bbs.ngacn.cc`, `nga.178.com`) as a Claude Code or Codex CLI session.
+
+![Thread in the Claude theme](docs/screenshots/thread-dark.png)
 
 ## Install
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/).
 2. Open [nga-code-agent-disguise.user.js](https://raw.githubusercontent.com/aromaw/nga-code-agent-disguise/main/nga-code-agent-disguise.user.js).
 
-`@updateURL` and `@downloadURL` point at that same file on `main`.
+`@updateURL` and `@downloadURL` point at that file on `main`.
+
+## How it reads
+
+The thread title, floor, author, time, and recommend count are separate. Quotes sit on an accent bar. Long posts stop at 14 lines; click the card or `expand N more lines`. Images stay `[image]` until you click one or turn `img` on, which loads lazy thumbnails. URLs in the body are links. The text column is 92 characters wide so a wide monitor does not stretch lines. The prompt and status stay on screen.
+
+A row of chips above the prompt starts the common commands. `Tab` completes the rest. `y` is required before a reply, a new thread, a bookmark, or a vote is sent.
 
 ## Keys
 
-The disguise toggle defaults to `` ` ``. It does not run while a text field is focused, while an IME composition is in progress, or for the key-up that confirms a candidate. `togglekey f2` (or `togglekey ctrl+.` and similar) stores a different shortcut. `togglekey reset` restores the backtick.
+`` ` `` toggles the disguise. It does not fire in a text field, during IME composition, or on the key that confirms an IME candidate. `togglekey f2` stores another shortcut. `togglekey reset` restores the backtick.
 
 | Key | Action |
 | --- | --- |
 | `` ` `` | Toggle the disguise, outside text fields |
-| `Esc` | Close help or a reply draft. Otherwise show a static cover screen. `Esc` or Resume brings the thread back. |
+| `Esc` | Close help or a draft. Otherwise show the static cover. `Esc` or Resume returns. |
 | `Ctrl+[` | Leave the command line |
 | `Tab` | Complete a command |
 | Up / Down | Command history |
+| Click a collapsed post | Expand that post |
 
-Vim keys are **off** until you run `vim`. With vim off, `t`, `?`, `i`, `j`, `k`, `h`, and `l` do nothing, so reading does not eat keystrokes. With vim on, and focus not in a text field:
+Vim is off until you run `vim`. Then, and only outside a text field: `j`/`k` scroll, `h`/`l` scroll one screen and do not change pages, `gg`/`G` jump to the ends, digits then Enter open a topic, `/` prefills search, `:` or `i` focus the prompt, `o` prefills `open` or `search:`, `t` cycles the theme, `?` opens help, `Ctrl+o` expands every post.
 
-| Key | Action |
-| --- | --- |
-| `j` / `k` | Scroll |
-| `h` / `l` | Scroll one screen. They do not change pages. |
-| `gg` / `G` | Top / bottom |
-| digits | `5j` repeats. On a topic list, digits then Enter open that topic. |
-| `/` | Prefill `search: ` |
-| `:` or `i` | Focus the command line |
-| `o` | Prefill `open ` on a list, or `search: ` in a thread |
-| `t` | Cycle the theme |
-| `?` | Help |
-| `Ctrl+o` | Expand or collapse every post |
-
-`next` and `prev` are what change pages. A page change drops posts that infinite scroll had already appended, which is why `h` and `l` no longer do it.
+`next` and `prev` are what change pages.
 
 ## Commands
 
-A leading `/` is optional. `/help` and `help` are the same command.
+A leading `/` is optional.
 
 ```
 help
-search: <words>          this board when a fid is known
-search: -g <words>       the whole site
-board list
-board add [name]         fid from the URL, the reply form, or the breadcrumb
-board <n>                open favorite n
-board fid <fid>          open a board, including a negative fid
-board del <n>
-next / prev / go page <n> / top
-ls / open <n>
+ls                         list loaded topics or floors
+open <n>                   open topic n on a board
+next · prev · go page <n> · top
+floor <n>                  scroll to a floor, or open its page
+sort reply · sort post     latest reply, or latest new thread
+search: <words>            this board when a fid is known
+search: -g <words>         the whole site
+op                         only the original poster, and keep appending those pages
+author <uid|name>          this person's posts, via authorid
+author off
+board list · board add [name] · board <n> · board del <n> · board fid <fid>
+bookmark · unbookmark      this thread. y confirms
+bookmark list              threads saved here, plus NGA's favorite page
 reply [text]
 reply <floor> [text]
 quote <floor> [text]
-img / op / expand / vim / autopage / compact / pause
-theme / claude / codex / dark / light
-togglekey <key>
-clear / exit / version / pwd / whoami
+post [title]               new thread in the current board. y confirms
+vote <floor>               recommend that floor. y confirms
+user [uid|name]            uid, location, floors on this page, profile link
+whoami
+noti                       notification links from the page, or the noti screen
+img · expand · vim · autopage · compact · pause
+theme · claude · codex · dark · light · togglekey <key>
+y · n · edit               send, cancel, or revise the pending preview
+clear · exit · version · pwd
 ```
 
-`img`, `op`, and `autopage` are also buttons in the status bar. The bar shows those flags and `page n of m` when the pager knows `m`. It does not show a fake context meter.
-
-On a page with no thread and no topic list, the screen offers `help`, `board list`, and `board fid`. The favorites row stays visible when it is empty.
-
-`compact` shortens the welcome text. It is off by default, so the hints and the favorites row stay on screen.
-
-`whoami` prints the name from the page header. If that node is missing or it is the logged-out label, the command prints `reader`.
-
-## Reading
-
-- Posts are clipped to 14 lines. Each post has its own expand control. `expand` or `Ctrl+o` opens all of them.
-- Images default to a `[image]` button so the page stays text. Click one to load it, or turn `img` on for lazy thumbnails. A failed image tries the link wrapped around it, then hides itself.
-- URLs in the post body are links. Links on an NGA host open in this tab. Other links open in a new tab.
-- `ls` lists every topic or post already loaded, not a fixed first page of 20.
-
-## Reply and quote
-
-`reply`, `reply <text>`, `reply <floor>`, and `quote <floor>` prepare a post as the user who is already logged in. `reply` with no text opens a multi-line box. Preview shows the body that will be sent. Nothing is submitted until you type `y`. `n` cancels. `edit` returns to the box. `Esc` cancels a pending confirm.
-
-The submit step copies the forum's own reply form (`post.php`), including whatever hidden fields that form already has, and posts it in a hidden iframe so the browser sends the session cookie and uses the form's charset. The script does not ask for a password and does not call any other host. If the form is not on the thread page, `y` loads `post.php?action=reply` for this tid first. NGA's visible error text (login, captcha, permission, and the rest) is printed in the panel. A failed send stays unposted so `y` can retry.
+State-changing commands copy a form or link from the page when one is there. Otherwise they post to the same host the forum uses: `post.php` for replies and new threads, `nuke.php` `topic_favor` for bookmarks, `nuke.php` `post_recommend` for votes, and `nuke.php?func=noti` or `thread.php?favor=1` for inbox and favorites. Nothing in that list is sent before `y`. The script does not ask for a password.
 
 ## Development
 
@@ -92,4 +78,4 @@ npm install
 npm test
 ```
 
-`npm test` runs `node --test tests/disguise.test.js` with jsdom and the HTML fixtures in `tests/fixtures/`. The tests do not contact NGA. Anonymous requests to the live site return 403 from this kind of environment, so the iframe submit, charset handling, and mirror-site DOM differences have not been verified in a browser session.
+`npm test` runs `node --test tests/disguise.test.js` with jsdom and `tests/fixtures/`. The tests do not contact NGA. Bookmark, vote, new-thread, and notification calls were not exercised against the live site.
