@@ -619,7 +619,7 @@
         const isOP = (opUid && uid && uid === opUid) || /\u697c\u4e3b/.test(name);
         name = name.replace(/\u697c\u4e3b/g, '').replace(/^\[|\]$/g, '').replace(/^UID\s*[:：]\s*/i, '').trim() || uid || 'user';
         const likeEl = b.querySelector('.recommendvalue');
-        const likes = likeEl ? (text(likeEl).replace(/\D+/g, '') || '0') : '';
+        const likes = likeEl ? recommendScore(text(likeEl)) : '';
         const quotes = content
             ? [...content.querySelectorAll('.quote')].map(q => {
                 let depth = 0, n = q.parentElement;
@@ -641,7 +641,7 @@
             '#' + (floorM ? floorM[1] : i + 1),
             name + (uid && uid !== name ? '(' + uid + ')' : ''),
             dateM && dateM[0],
-            likes !== '' ? '+' + likes : '',
+            likes !== '' ? formatScore(likes) : '',
         ].filter(Boolean).join(' · ');
         const body = contentText(content);
         const id = floorM ? 'floor:' + floorM[1] + ':' + uid : [uid, dateM && dateM[0], body.text.slice(0, 40)].join('|');
@@ -985,19 +985,46 @@
                 { name: 'fid', value: String(fid || '') },
                 { name: 'value', value: '1' },
             ],
-            body: 'Upvote #' + post.floor + ' ' + (post.name || '') + ' pid=' + post.pid + ' current +' + (post.likes === '' ? '0' : post.likes),
+            body: 'Upvote #' + post.floor + ' ' + (post.name || '') + ' pid=' + post.pid + ' current ' + (post.likes === '' ? '0' : formatScore(post.likes)),
         };
+    }
+
+    function recommendScore(raw) {
+        const match = String(raw || '').match(/-?\d+/);
+        return match ? String(parseInt(match[0], 10)) : '0';
+    }
+
+    function formatScore(likes) {
+        if (likes === '' || likes == null) return '';
+        const n = Number(likes);
+        if (!Number.isFinite(n)) return '';
+        return n > 0 ? '+' + n : String(n);
+    }
+
+    function bookmarkActionHref(doc) {
+        const links = [...(doc || document).querySelectorAll('a[href]')];
+        const hit = links.find(a => {
+            const href = a.getAttribute('href') || '';
+            if (!href || /^javascript:/i.test(href)) return false;
+            let path = href;
+            try {
+                const u = new URL(href, location.href);
+                path = u.pathname + u.search;
+            } catch (err) { path = href; }
+            const low = path.toLowerCase();
+            // thread.php?favor=1 is the favorites list, not the add/remove call.
+            if (/thread\.php/.test(low)) return false;
+            return /topic_favor/.test(low) || (/nuke\.php/.test(low) && /favor/.test(low));
+        });
+        return hit ? hit.getAttribute('href') : '';
     }
 
     function buildBookmarkPayload(opts) {
         opts = opts || {};
         const remove = !!opts.remove;
-        const link = [...document.querySelectorAll('a[href*="topic_favor"], a[href*="favor"]')].find(a => {
-            const href = a.getAttribute('href') || '';
-            return href && !/^javascript:/i.test(href);
-        });
+        const link = bookmarkActionHref(document);
         return {
-            action: (link && link.getAttribute('href')) || '/nuke.php?__output=11',
+            action: link || '/nuke.php?__output=11',
             method: 'POST',
             acceptCharset: 'UTF-8',
             fields: [
@@ -2365,7 +2392,7 @@
                 <button type="button" class="cad-action cad-author" title=${tip} onClick=${() => runCmd('user ' + (p.uid || p.name))}>${p.name}</button>
                 ${p.isOP ? html`<span class="cad-op">OP</span>` : null}
                 ${p.date ? html`<span>${p.date}</span>` : null}
-                ${p.likes !== '' ? html`<span class="cad-likes">+${p.likes}</span>` : null}
+                ${p.likes !== '' ? html`<span class="cad-likes">${formatScore(p.likes)}</span>` : null}
                 <${Loc} uid=${p.uid} />
                 <button type="button" class="cad-action" onClick=${() => beginReply({ post: p, text: '', compose: true })}>quote</button>
             </header>

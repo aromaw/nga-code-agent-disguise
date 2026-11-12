@@ -407,8 +407,28 @@ test('sort, floor, author, vote, bookmark, and new thread stay behind an explici
     const vote = cad.buildVotePayload(posts[0], '9', '-7');
     assert.equal(vote.fields.find(field => field.name === 'pid').value, '555');
     assert.equal(vote.fields.find(field => field.name === '__act').value, 'recommend');
+    const nav = document.createElement('a');
+    nav.setAttribute('href', '/thread.php?favor=1');
+    nav.textContent = 'favorites';
+    document.body.appendChild(nav);
+    const ignored = cad.buildBookmarkPayload({ tid: '9', fid: '-7', title: 'Test thread', remove: false });
+    assert.equal(ignored.action, '/nuke.php?__output=11');
+    assert.equal(ignored.fields.find(field => field.name === '__act').value, 'add');
+    const action = document.createElement('a');
+    action.setAttribute('href', '/nuke.php?__lib=topic_favor&__act=add&tid=9');
+    document.body.appendChild(action);
     const mark = cad.buildBookmarkPayload({ tid: '9', fid: '-7', title: 'Test thread', remove: false });
+    assert.match(mark.action, /topic_favor/);
     assert.equal(mark.fields.find(field => field.name === '__act').value, 'add');
+
+    const scored = new window.DOMParser().parseFromString(
+        '<div class="forumbox postbox"><div class="posterinfo"><a class="author" href="nuke.php?uid=1">A</a></div><div class="postinfo">#3 2026-01-01</div><div class="postcontent">hi</div><span class="recommendvalue">-3</span></div>',
+        'text/html'
+    );
+    const negative = cad.extractPosts(scored).posts[0];
+    assert.equal(negative.likes, '-3');
+    assert.match(negative.head, /-3/);
+    assert.equal(negative.head.includes('+3'), false);
 
     const calls = [];
     window.__cadMockSubmit = async (payload) => {
