@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NGA Code Agent Disguise
 // @namespace    https://github.com/aromaw/nga-code-agent-disguise
-// @version      4.1.1
+// @version      4.1.2
 // @description  Disguise NGA forum pages as a Claude Code / Codex CLI session. Backtick toggles outside text fields, /help lists commands, and reply/quote post through the site's own form after a confirm step.
 // @author       aromaw
 // @match        *://bbs.nga.cn/*
@@ -20,7 +20,7 @@
     'use strict';
 
     const TEST = typeof globalThis !== 'undefined' && !!globalThis.__CAD_TEST;
-    const VERSION = '4.1.1';
+    const VERSION = '4.1.2';
     const POST_PREVIEW_LINES = 14;
 
     /* ================= settings ================= */
@@ -1476,7 +1476,7 @@
         favorPending = true;
         const host = location.host || 'bbs.nga.cn';
         fetch((location.protocol || 'https:') + '//' + host + '/thread.php?favor=1', { credentials: 'include', method: 'GET' })
-            .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+            .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return decodeRes(r); })
             .then(txt => {
                 const doc = new DOMParser().parseFromString(txt, 'text/html');
                 const data = extractTopics(doc, (location.origin || ('https://' + host)) + '/thread.php?favor=1');
@@ -1503,7 +1503,7 @@
 
     /* ================= locations ================= */
     function walkUcpName(obj, depth) {
-        if (!obj || depth > 4) return '';
+        if (!obj || depth > 6) return '';
         if (typeof obj === 'string') {
             const decoded = decodeUuname(obj);
             const n = cleanAuthorName(decoded || obj);
@@ -1518,6 +1518,15 @@
                 const n = walkUcpName(item, depth + 1);
                 if (n) return n;
             }
+        }
+        const row = obj[0] || obj['0'];
+        if (row && row !== obj) {
+            const n = walkUcpName(row, depth + 1);
+            if (n) return n;
+        }
+        if (obj.data && obj.data !== obj) {
+            const n = walkUcpName(obj.data, depth + 1);
+            if (n) return n;
         }
         return '';
     }
@@ -1540,31 +1549,115 @@
         return true;
     }
 
+    function locFromUcpData(res) {
+        if (!res) return '';
+        const data = res.data !== undefined ? res.data : res;
+        const row = Array.isArray(data) ? data[0] : (data && (data[0] || data['0'] || data));
+        return (row && (row.ipLoc || row.iploc || row.ip_loc)) || (data && data.ipLoc) || '';
+    }
+
+    function ucpUrls(uid) {
+        const host = (typeof location !== 'undefined' && location.host) ? location.host : 'bbs.nga.cn';
+        const proto = (typeof location !== 'undefined' && location.protocol === 'http:') ? 'http:' : 'https:';
+        const base = proto + '//' + host + '/nuke.php';
+        const id = encodeURIComponent(String(uid || ''));
+        // Official NGA call is __lib=ucp&__act=get&lite=js&uid=. __output=11 is JSON;
+        // __output=8 is the same payload, often prefixed with window.script_muti_get_var_store=.
+        return [
+            base + '?__lib=ucp&__act=get&lite=js&uid=' + id + '&__output=11',
+            base + '?__lib=ucp&__act=get&uid=' + id + '&__output=8',
+            base + '?__lib=ucp&__act=get&lite=js&uid=' + id,
+        ];
+    }
+
+    let lastNameProbe = null;
     const ucpInflight = Object.create(null);
+    const ucpQueue = [];
+    let ucpBusy = false;
+    const UCP_GAP = TEST ? 0 : 300;
+
+    function rememberLoc(id, loc) {
+        if (!id || !loc) return;
+        const keys = Object.keys(locCache);
+        if (keys.length > 800) keys.slice(0, 400).forEach(k => delete locCache[k]);
+        locCache[id] = loc;
+        GM_setValue('cad_loc_cache', locCache);
+    }
+
+    function probeUcpUrl(uid, url) {
+        const report = { uid: String(uid || ''), url: url, status: 0, contentType: '', bodyHead: '', parseError: '', name: '', loc: '' };
+        return fetch(url, { credentials: 'include', method: 'GET' })
+            .then(r => {
+                report.status = r.status;
+                report.contentType = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
+                return decodeRes(r);
+            })
+            .then(text => {
+                report.bodyHead = String(text || '').slice(0, 300);
+                const parsed = parseNukeJson(text);
+                if (!parsed.ok) {
+                    report.parseError = parsed.error || 'parse failed';
+                    lastNameProbe = report;
+                    return { report, data: null };
+                }
+                report.name = nameFromUcpData(parsed.data);
+                report.loc = locFromUcpData(parsed.data);
+                lastNameProbe = report;
+                return { report, data: parsed.data };
+            })
+            .catch(err => {
+                report.parseError = (err && err.message) ? err.message : String(err);
+                lastNameProbe = report;
+                return { report, data: null };
+            });
+    }
+
+    function actuallyFetchUcp(uid) {
+        const id = String(uid || '');
+        const urls = ucpUrls(id);
+        let i = 0;
+        const step = () => {
+            if (i >= urls.length) return Promise.resolve(null);
+            const url = urls[i++];
+            return probeUcpUrl(id, url).then(out => {
+                if (out && out.data) {
+                    const loc = (out.report && out.report.loc) || locFromUcpData(out.data);
+                    const name = (out.report && out.report.name) || nameFromUcpData(out.data);
+                    if (loc) rememberLoc(id, loc);
+                    if (name) rememberName(id, name);
+                    return { loc, name, report: out.report };
+                }
+                // Parsed failure or HTTP failure: try the next official-style URL.
+                return step();
+            });
+        };
+        return step();
+    }
+
     function fetchUcp(uid) {
         const id = String(uid || '');
         if (!id || !/^\d+$/.test(id)) return Promise.resolve(null);
         if (ucpInflight[id]) return ucpInflight[id];
-        const host = (typeof location !== 'undefined' && location.host) ? location.host : 'bbs.nga.cn';
-        const url = 'https://' + host + '/nuke.php?__output=11&__act=get&__lib=ucp&lite=js&uid=' + encodeURIComponent(id);
-        const req = fetch(url, { credentials: 'include', method: 'GET' })
-            .then(r => r.json())
-            .then(res => {
-                const loc = res && res.data && (Array.isArray(res.data) ? res.data[0] : res.data) && (res.data[0] || res.data).ipLoc || '';
-                if (loc) {
-                    const keys = Object.keys(locCache);
-                    if (keys.length > 800) keys.slice(0, 400).forEach(k => delete locCache[k]);
-                    locCache[id] = loc;
-                    GM_setValue('cad_loc_cache', locCache);
-                }
-                const name = nameFromUcpData(res);
-                if (name) rememberName(id, name);
-                return { loc, name };
-            })
-            .catch(() => null)
-            .finally(() => { delete ucpInflight[id]; });
+        const req = new Promise(resolve => {
+            ucpQueue.push({ id, resolve });
+            pumpUcp();
+        }).finally(() => { delete ucpInflight[id]; });
         ucpInflight[id] = req;
         return req;
+    }
+
+    function pumpUcp() {
+        if (ucpBusy || !ucpQueue.length) return;
+        ucpBusy = true;
+        const { id, resolve } = ucpQueue.shift();
+        actuallyFetchUcp(id)
+            .then(r => resolve(r || null))
+            .catch(() => resolve(null))
+            .finally(() => {
+                const done = () => { ucpBusy = false; pumpUcp(); };
+                if (UCP_GAP) setTimeout(done, UCP_GAP);
+                else done();
+            });
     }
 
     function fetchLoc(uid) {
@@ -2549,12 +2642,9 @@
         let loc = card.loc;
         if (card.uid) {
             try {
-                const res = await fetch('https://' + location.host + '/nuke.php?__output=11&__act=get&__lib=ucp&uid=' + encodeURIComponent(card.uid), { credentials: 'include' });
-                const json = await res.json();
-                const row = json && json.data && json.data[0] || {};
-                name = row.username || row.nick || row.name || name;
-                loc = row.ipLoc || loc;
-                if (loc) locMap[card.uid] = loc;
+                const info = await fetchUcp(card.uid);
+                if (info && info.name) name = info.name;
+                if (info && info.loc) { loc = info.loc; locMap[card.uid] = info.loc; }
             } catch (err) { /* keep the name already on the page */ }
         }
         const href = card.href || (card.uid ? new URL('/nuke.php?func=ucp&uid=' + encodeURIComponent(card.uid), location.href).href : '');
@@ -2566,6 +2656,68 @@
                 line(card.floors && card.floors.length ? esc('floors on this page: ' + card.floors.join(', ')) : 'No posts by that person are loaded.', 'cad-faint'),
             ].join(''),
         };
+        renderApp();
+    }
+
+    async function cmdDebugNames() {
+        if (lastData && lastData.kind === 'posts') {
+            applyCachedNames(lastData.posts);
+            applyCachedNames(lastData.hot);
+        }
+        const posts = ((lastData && lastData.posts) || []).filter(p => !p.sep);
+        const byUid = new Map();
+        posts.forEach(p => {
+            if (!p.uid) return;
+            if (!byUid.has(p.uid)) byUid.set(p.uid, { uid: p.uid, name: p.name, floors: [] });
+            const row = byUid.get(p.uid);
+            row.floors.push(p.floor);
+            if (p.name && !isUidLabel(p.name)) row.name = p.name;
+        });
+        const authors = [...byUid.values()];
+        const resolved = authors.filter(a => a.name && !isUidLabel(a.name));
+        const unresolved = authors.filter(a => !a.name || isUidLabel(a.name));
+        const lines = [
+            line('<b>debug names</b> · v' + VERSION, 'cad-sect'),
+            line(esc(resolved.length + ' resolved, ' + unresolved.length + ' unresolved, ' + authors.length + ' unique authors on ' + posts.length + ' posts'), 'cad-faint'),
+        ];
+        if (resolved.length) {
+            const sample = resolved.slice(0, 8).map(a => a.name + ' (' + a.uid + ')').join(', ');
+            lines.push(line(esc('resolved: ' + sample + (resolved.length > 8 ? '…' : '')), 'cad-faint'));
+        }
+        if (!unresolved.length) {
+            lines.push(line('Every loaded author already has a real name.', 'cad-faint'));
+            panel = { title: 'debug names', html: lines.join('') };
+            renderApp();
+            return;
+        }
+        const first = unresolved[0];
+        lines.push(line(esc('first unresolved: uid ' + first.uid + ' · floors ' + first.floors.join(', ') + ' · display ' + (first.name || '—')), 'cad-faint'));
+        panel = { title: 'debug names', html: lines.join('') + line('Probing NGA ucp…', 'cad-faint') };
+        renderApp();
+        const result = await actuallyFetchUcp(first.uid);
+        const probe = (result && result.report) || lastNameProbe;
+        if (!probe) {
+            lines.push(line('No probe result. The fetch may have been blocked.', 'cad-faint'));
+        } else {
+            lines.push(line(esc('URL: ' + probe.url), 'cad-faint'));
+            lines.push(line(esc('HTTP ' + (probe.status || '—') + (probe.contentType ? ' · ' + probe.contentType : '')), 'cad-faint'));
+            lines.push(line('decoded body (first 300 characters):', 'cad-faint'));
+            lines.push('<pre class="cad-preview">' + esc(probe.bodyHead || '(empty)') + '</pre>');
+            if (probe.parseError) lines.push(line(esc('parse error: ' + probe.parseError), ''));
+            else {
+                const bit = probe.name
+                    ? 'JSON parsed · name ' + probe.name + (probe.loc ? ' · loc ' + probe.loc : '')
+                    : 'JSON parsed · no display name in the payload' + (probe.loc ? ' · loc ' + probe.loc : '');
+                lines.push(line(esc(bit), 'cad-faint'));
+            }
+            if (result && result.name) {
+                applyCachedNames(lastData && lastData.posts);
+                applyCachedNames(lastData && lastData.hot);
+                lines.push(line(esc('applied name: ' + result.name), 'cad-faint'));
+                scheduleLocRender();
+            }
+        }
+        panel = { title: 'debug names', html: lines.join('') };
         renderApp();
     }
 
@@ -2678,6 +2830,7 @@
             toggleDisguise();
             return;
         }
+        else if (m === 'debug names' || m === 'debug name') return cmdDebugNames();
         else if (m === 'version' || m === 'about')
             out = [line('NGA Code Agent Disguise <b>v' + VERSION + '</b> · ` toggles outside text fields · /help', 'cad-faint')];
         else if (m === 'pwd') out = [line(esc(cwdFor(lastData || { kind: 'idle' })), 'cad-faint')];
@@ -2983,18 +3136,109 @@
         ensureLocs();
     }
 
+    function normalizeCharset(cs) {
+        const c = String(cs || '').trim().toLowerCase().replace(/_/g, '-');
+        if (!c) return '';
+        if (/^(gbk|gb2312|gb-2312|gb18030|windows-936|cp936|x-gbk|csgb2312)$/i.test(c)) return 'gbk';
+        if (/^utf-?8$/.test(c)) return 'utf-8';
+        return c;
+    }
+
+    function textDecoder(cs, opts) {
+        const TD = (typeof TextDecoder === 'function')
+            ? TextDecoder
+            : (typeof globalThis !== 'undefined' && typeof globalThis.TextDecoder === 'function' && globalThis.TextDecoder);
+        if (typeof TD !== 'function') throw new Error('TextDecoder is not available');
+        return new TD(cs, opts);
+    }
+
+    function asBytes(buf) {
+        if (!buf) return new Uint8Array(0);
+        try {
+            if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView && ArrayBuffer.isView(buf)) {
+                return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+            }
+        } catch (err) { /* cross-realm views */ }
+        const len = (buf.byteLength != null) ? buf.byteLength : (buf.length != null ? buf.length : 0);
+        try {
+            const view = new Uint8Array(buf);
+            if (view.byteLength === len) return view;
+        } catch (err) { /* copy below */ }
+        const out = new Uint8Array(len);
+        try { out.set(new Uint8Array(buf)); }
+        catch (err) {
+            for (let i = 0; i < len; i++) out[i] = buf[i] & 0xff;
+        }
+        return out;
+    }
+
+    function decodeBuffer(buf, hint) {
+        const raw = asBytes(buf);
+        const trials = [];
+        const add = cs => { if (cs && trials.indexOf(cs) < 0) trials.push(cs); };
+        const declared = normalizeCharset(hint);
+        // NGA serves GBK. Prefer it unless a UTF-8 hint decodes cleanly with no replacements.
+        add('gbk');
+        add('gb18030');
+        if (declared && declared !== 'gbk') add(declared);
+        add('utf-8');
+        let best = '', bestScore = -1e9, bestCs = '';
+        for (const cs of trials) {
+            try {
+                const t = textDecoder(cs, { fatal: false }).decode(raw);
+                const bad = (t.match(/\uFFFD/g) || []).length;
+                // Prefer fewer replacement glyphs, then prefer gbk on a tie.
+                const score = (-bad * 1000) + (cs === 'gbk' || cs === 'gb18030' ? 2 : 0) + (cs === declared ? 1 : 0);
+                if (score > bestScore) { best = t; bestScore = score; bestCs = cs; }
+            } catch (err) { /* try next */ }
+        }
+        return best;
+    }
+
     function decodeRes(r) {
-        const m = (r.headers.get('content-type') || '').match(/charset=([\w-]+)/i);
+        const headerCs = ((r.headers && r.headers.get && r.headers.get('content-type')) || '').match(/charset=([\w-]+)/i);
         return r.arrayBuffer().then(buf => {
-            let cs = m && m[1];
+            let cs = headerCs && headerCs[1];
             if (!cs) {
-                const head = new TextDecoder('latin1').decode(buf.slice(0, 4096));
-                const mm = head.match(/charset=["']?([\w-]+)/i);
+                const head = textDecoder('latin1').decode(asBytes(buf).slice(0, 4096));
+                const mm = String(head).match(/charset=["']?([\w-]+)/i);
                 cs = mm && mm[1];
             }
-            try { return new TextDecoder(cs || 'gbk').decode(buf); }
-            catch (err) { return new TextDecoder('gbk').decode(buf); }
+            return decodeBuffer(buf, cs);
         });
+    }
+
+    function stripNukePrefix(text) {
+        let s = String(text || '').replace(/^\uFEFF/, '').trim();
+        s = s.replace(/^\/\*[\s\S]*?\*\/\s*/, '');
+        s = s.replace(/^(?:window\s*\.\s*)?script_muti_get_var_store\s*=\s*/i, '');
+        s = s.replace(/^\/\/[^\n]*\n/, '');
+        s = s.replace(/;\s*$/, '');
+        return s.trim();
+    }
+
+    function parseNukeJson(text) {
+        const stripped = stripNukePrefix(text);
+        const tryParse = raw => {
+            try { return { ok: true, data: JSON.parse(raw), error: null }; }
+            catch (err) { return { ok: false, data: null, error: (err && err.message) ? err.message : String(err) }; }
+        };
+        let out = tryParse(stripped);
+        if (out.ok) return out;
+        const i = stripped.indexOf('{');
+        const j = stripped.lastIndexOf('}');
+        if (i >= 0 && j > i) {
+            const inner = tryParse(stripped.slice(i, j + 1));
+            if (inner.ok) return inner;
+            out = inner;
+        }
+        const k = stripped.indexOf('[');
+        const l = stripped.lastIndexOf(']');
+        if (k >= 0 && l > k) {
+            const inner = tryParse(stripped.slice(k, l + 1));
+            if (inner.ok) return inner;
+        }
+        return { ok: false, data: null, error: out.error || 'parse failed' };
     }
 
     function loadNextPage() {
@@ -3888,7 +4132,14 @@
             absImg,
             imgSrc,
             nameFromUcpData,
+            locFromUcpData,
             rememberName,
+            decodeBuffer,
+            decodeRes,
+            parseNukeJson,
+            stripNukePrefix,
+            ucpUrls,
+            get lastNameProbe() { return lastNameProbe; },
             ensureLocs,
             ingestLiveUserInfo,
             ingestHydratedAuthors,

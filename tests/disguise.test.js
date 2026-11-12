@@ -21,6 +21,8 @@ function load(html, url, values = {}) {
         (window.document.head || window.document.documentElement).appendChild(style);
     };
     window.__CAD_TEST = true;
+    if (typeof window.TextDecoder !== 'function') window.TextDecoder = TextDecoder;
+    if (typeof window.TextEncoder !== 'function') window.TextEncoder = TextEncoder;
     window.fetch = async (input) => {
         const href = String(input && input.url ? input.url : input);
         if (href.includes('nuke.php')) {

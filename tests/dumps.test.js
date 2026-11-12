@@ -29,6 +29,8 @@ function loadDump(name, url) {
         (window.document.head || window.document.documentElement).appendChild(style);
     };
     window.__CAD_TEST = true;
+    if (typeof window.TextDecoder !== 'function') window.TextDecoder = TextDecoder;
+    if (typeof window.TextEncoder !== 'function') window.TextEncoder = TextEncoder;
     window.fetch = async () => { throw new Error('blocked'); };
     const script = window.document.createElement('script');
     script.textContent = source;

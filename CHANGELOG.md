@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.1.2
+
+Favorite titles and author names were garbled or missing because NGA serves GBK, and some fetches decoded the body as UTF-8.
+
+### Fixed
+
+- Every fetch now decodes the body with `TextDecoder('gbk')` via `arrayBuffer`, using the response charset or an HTML meta tag as a hint. UTF-8 is only kept when it decodes cleanly. The favor-page fetch, ucp GETs, authorid pages, notifications, and next-page loads all share this path. Calling `response.text()` or `response.json()` is no longer used for NGA responses.
+- The ucp name GET follows NGA's own `__API.userInfo`: `/nuke.php?__lib=ucp&__act=get&lite=js&uid=`, then `/nuke.php?__lib=ucp&__act=get&uid=&__output=8` if the first body does not parse. `__output=11` JSON may be prefixed with `window.script_muti_get_var_store=`; that prefix is stripped before `JSON.parse`. Requests are GET only, with `credentials: 'include'`, one at a time, and still at most one successful cache write per uid.
+
+### Added
+
+- Hidden command `debug names` (not in the slash menu). It prints how many authors are resolved vs. unresolved, then for the first unresolved uid: the attempted URL, HTTP status, content-type, the first 300 characters of the decoded body, and the parse error if any.
+
 ## 4.1.1
 
 Fixes from a logged-in live test of 4.1.0. Parsing follows NGA's own `commonui.postArg`, attachment lists, and user-info data.

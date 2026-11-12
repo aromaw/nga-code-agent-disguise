@@ -22,6 +22,8 @@ function load(html, url, values = {}) {
         (window.document.head || window.document.documentElement).appendChild(style);
     };
     window.__CAD_TEST = true;
+    if (typeof window.TextDecoder !== 'function') window.TextDecoder = TextDecoder;
+    if (typeof window.TextEncoder !== 'function') window.TextEncoder = TextEncoder;
     window.fetch = async (input) => {
         const href = String(input && input.url ? input.url : input);
         if (href.includes('nuke.php')) {
@@ -334,11 +336,20 @@ test('lazy, relative, BBCode, and attach.load images become real thumbnails', ()
     assert.equal(p.text.includes('about:blank'), false);
 });
 
-test('a cached ucp GET fills UID placeholders, at most once per uid, and never POSTs', async () => {
-    const html = `<!doctype html><html><head><title>t - NGA</title></head><body>
+function gbkBuffer(hex) {
+    return Uint8Array.from(hex.match(/../g).map(h => parseInt(h, 16))).buffer;
+}
+
+// window.script_muti_get_var_store={"data":[{"uid":"2202186","username":"西西弗读者","uuname":"","ipLoc":"上海"}]};
+const UCP_GBK_PREFIXED = '77696e646f772e7363726970745f6d7574695f6765745f7661725f73746f72653d7b2264617461223a5b7b22756964223a2232323032313836222c22757365726e616d65223a22cef7cef7b8a5b6c1d5df222c2275756e616d65223a22222c2269704c6f63223a22c9cfbaa3227d5d7d3b';
+// 关于我在2024年遇到的那些奇人异事
+const FAV_TITLE_GBK = 'b9d8d3daced2d4da32303234c4ead3f6b5bdb5c4c4c7d0a9c6e6c8cbd2eccac2';
+
+function nameThread(uid, label) {
+    return `<!doctype html><html><head><title>t - NGA</title></head><body>
 <div id="m_posts">
 <table class="forumbox postbox"><tbody><tr>
-<td class="c1"><a href="/nuke.php?func=ucp&amp;uid=2202186" id="postauthor23">UID:2202186</a></td>
+<td class="c1"><a href="/nuke.php?func=ucp&amp;uid=${uid}" id="postauthor23">${label}</a></td>
 <td class="c2" id="postcontainer23">
 <a name="l23" id="pid887652640Anchor"></a>
 <div class="postcontent" id="postcontent23">hi</div>
@@ -346,7 +357,10 @@ test('a cached ucp GET fills UID placeholders, at most once per uid, and never P
 </tr></tbody></table>
 </div>
 </body></html>`;
-    const { cad, window, gm } = load(html, 'https://bbs.nga.cn/read.php?tid=9', { cad_on: true });
+}
+
+test('a cached ucp GET fills UID placeholders from a GBK prefixed JSON body, at most once per uid, and never POSTs', async () => {
+    const { cad, window, gm } = load(nameThread('2202186', 'UID:2202186'), 'https://bbs.nga.cn/read.php?tid=9', { cad_on: true });
     const seen = [];
     window.fetch = async (input, init) => {
         const href = String(input && input.url ? input.url : input);
@@ -354,6 +368,7 @@ test('a cached ucp GET fills UID placeholders, at most once per uid, and never P
         seen.push({ href, method });
         assert.equal(String(method).toUpperCase(), 'GET');
         assert.match(href, /nuke\.php/);
+        assert.match(href, /__lib=ucp/);
         assert.match(href, /__act=get/);
         assert.match(href, /uid=2202186/);
         assert.equal(/__act=set|__act=add|__act=del/i.test(href), false);
@@ -361,22 +376,25 @@ test('a cached ucp GET fills UID placeholders, at most once per uid, and never P
             ok: true,
             status: 200,
             url: href,
-            headers: { get: () => 'application/json' },
-            json: async () => ({ data: [{ uid: '2202186', username: '西西弗读者', uuname: '', ipLoc: '上海' }] }),
-            arrayBuffer: async () => new TextEncoder().encode('{}').buffer,
+            headers: { get: (n) => (String(n).toLowerCase() === 'content-type' ? 'application/json; charset=gbk' : null) },
+            json: async () => { throw new Error('should not call json() on a GBK body'); },
+            text: async () => { throw new Error('should not call text() — it would decode as UTF-8'); },
+            arrayBuffer: async () => gbkBuffer(UCP_GBK_PREFIXED),
         };
     };
     assert.equal(cad.nameFromUcpData({ data: [{ username: '西西弗读者', uid: '2202186' }] }), '西西弗读者');
+    assert.equal(cad.nameFromUcpData({ data: { 0: { username: 'UID:9', uuname: 'e6b58be8af95' } } }), '测试');
     cad.boot();
-    await new Promise(r => setTimeout(r, 60));
+    await new Promise(r => setTimeout(r, 80));
     const data = cad.extract();
     assert.equal(data.posts[0].name, '西西弗读者');
     const first = seen.length;
     assert.ok(first >= 1);
+    assert.match(seen[0].href, /__lib=ucp/);
     cad.ensureLocs();
     cad.ensureLocs();
     await new Promise(r => setTimeout(r, 40));
-    assert.equal(seen.length, first);
+    assert.equal(seen.length, first, 'one request per uid');
     assert.equal(gm.cad_name_cache['2202186'], '西西弗读者');
 });
 
@@ -447,4 +465,87 @@ test('the main column is a little wider than 92ch', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'nga-code-agent-disguise.user.js'), 'utf8');
     assert.match(src, /max-width:\s*110ch/);
     assert.equal(/max-width:\s*92ch/.test(src), false);
+});
+
+test('decodeBuffer prefers GBK and does not leave replacement glyphs in NGA titles', () => {
+    const { cad } = load(emptyHtml, 'https://bbs.nga.cn/thread.php?favor=1');
+    const buf = gbkBuffer(FAV_TITLE_GBK);
+    const asUtf8 = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(buf));
+    assert.match(asUtf8, /\uFFFD/);
+    const got = cad.decodeBuffer(buf, 'gbk');
+    assert.equal(got, '关于我在2024年遇到的那些奇人异事');
+    assert.equal(/\uFFFD/.test(got), false);
+    // Even with a wrong utf-8 content-type hint, GBK wins when UTF-8 is full of replacements.
+    const despite = cad.decodeBuffer(buf, 'utf-8');
+    assert.equal(despite, '关于我在2024年遇到的那些奇人异事');
+});
+
+test('parseNukeJson strips the script_muti_get_var_store prefix', () => {
+    const { cad } = load(emptyHtml, 'https://bbs.nga.cn/read.php?tid=1');
+    const raw = 'window.script_muti_get_var_store={"data":[{"uid":"7","username":"测试用户"}]};';
+    const parsed = cad.parseNukeJson(raw);
+    assert.equal(parsed.ok, true);
+    assert.equal(cad.nameFromUcpData(parsed.data), '测试用户');
+    const wrapped = '/*comment*/ window.script_muti_get_var_store = {"data":{"0":{"uuname":"e6b58be8af95","username":"UID:42"}}};';
+    const p2 = cad.parseNukeJson(wrapped);
+    assert.equal(p2.ok, true);
+    assert.equal(cad.nameFromUcpData(p2.data), '测试');
+    const bad = cad.parseNukeJson('<html>not json</html>');
+    assert.equal(bad.ok, false);
+    assert.ok(bad.error);
+});
+
+test('ucp URLs match what NGA own JS calls, including __output=8', () => {
+    const { cad } = load(emptyHtml, 'https://bbs.nga.cn/read.php?tid=1');
+    const urls = cad.ucpUrls('17694632');
+    assert.ok(urls.some(u => /__lib=ucp/.test(u) && /__act=get/.test(u) && /lite=js/.test(u) && /uid=17694632/.test(u) && /__output=11/.test(u)));
+    assert.ok(urls.some(u => /__lib=ucp/.test(u) && /__act=get/.test(u) && /uid=17694632/.test(u) && /__output=8/.test(u)));
+    assert.equal(urls.every(u => /__act=get/.test(u)), true);
+    assert.equal(urls.some(u => /__act=set|POST/i.test(u)), false);
+});
+
+test('debug names prints counts, the first unresolved uid, URL, status, body, and a parse error', async () => {
+    const { cad, window, document } = load(nameThread('909132', 'UID:909132'), 'https://bbs.nga.cn/read.php?tid=47902535&page=2', { cad_on: true });
+    window.fetch = async (input, init) => {
+        const href = String(input && input.url ? input.url : input);
+        assert.equal(((init && init.method) || 'GET').toUpperCase(), 'GET');
+        return {
+            ok: true,
+            status: 200,
+            url: href,
+            headers: { get: (n) => (String(n).toLowerCase() === 'content-type' ? 'text/html; charset=gbk' : null) },
+            json: async () => { throw new Error('not json'); },
+            arrayBuffer: async () => new TextEncoder().encode('<html><body>login first 请先登录</body></html>').buffer,
+        };
+    };
+    cad.boot();
+    await cad.runCmd('debug names');
+    await new Promise(r => setTimeout(r, 60));
+    const panel = document.querySelector('.cad-panel, .cad-modal-card');
+    assert.ok(panel);
+    const text = panel.textContent;
+    assert.match(text, /0 resolved/);
+    assert.match(text, /1 unresolved/);
+    assert.match(text, /909132/);
+    assert.match(text, /nuke\.php/);
+    assert.match(text, /__lib=ucp/);
+    assert.match(text, /HTTP 200/);
+    assert.match(text, /text\/html/);
+    assert.match(text, /请先登录|login first/);
+    assert.match(text, /parse error/i);
+    const urls = cad.ucpUrls('909132');
+    // After a failed parse, the probe should have tried at least the first official URL.
+    assert.ok(cad.lastNameProbe);
+    assert.ok(urls.includes(cad.lastNameProbe.url) || urls.some(u => cad.lastNameProbe.url === u));
+    assert.ok(cad.lastNameProbe.parseError);
+    assert.ok((cad.lastNameProbe.bodyHead || '').includes('请先登录') || (cad.lastNameProbe.bodyHead || '').includes('login first'));
+});
+
+test('debug names is hidden from the slash menu', () => {
+    const { cad } = load(emptyHtml, 'https://bbs.nga.cn/read.php?tid=1');
+    const hits = cad.slashHits('/');
+    assert.equal(hits.some(h => /debug/.test(typeof h === 'string' ? h : (h.cmd || h.name || JSON.stringify(h)))), false);
+    const src = fs.readFileSync(path.join(__dirname, '..', 'nga-code-agent-disguise.user.js'), 'utf8');
+    assert.equal(/const CMDS = \[[^\]]*debug names/.test(src), false);
+    assert.match(src, /m === 'debug names'/);
 });
