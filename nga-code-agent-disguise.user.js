@@ -108,6 +108,8 @@
     #cad__root, #cad__root * { box-sizing:border-box; }
     #cad__root button { font:inherit; color:inherit; }
     #cad__root a:focus-visible, #cad__root button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    /* The shell is one column inside the fixed root, so the post list scrolls and the prompt stays put. */
+    .cad-app { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
     #cad__root .cad-body { min-height:0; overflow-x:hidden; overscroll-behavior:contain; }
 
     .cad-topbar { flex-shrink:0; min-height:30px; display:flex; align-items:center; gap:6px; padding:0 10px; user-select:none; border-bottom:1px solid var(--border); }
@@ -196,7 +198,8 @@
     .cad-panelhead { display:flex; justify-content:space-between; align-items:center; gap:12px; color:var(--accent2); position:sticky; top:0; background:var(--bg); }
     .cad-compose { width:100%; min-height:7em; margin:8px 0; background:var(--bg-input); color:inherit; border:1px solid var(--border); font:inherit; padding:8px; resize:vertical; }
     .cad-preview { white-space:pre-wrap; word-break:break-word; margin:8px 0; padding:8px 10px; border:1px dashed var(--border); border-radius:6px; }
-    .cad-covered > .cad-body, .cad-covered > .cad-inputbar, .cad-covered > .cad-statusbar, .cad-covered > .cad-panel { display:none; }
+    /* cad-covered is on #cad__root; the thread, prompt, and reply panel live under .cad-app. */
+    .cad-covered .cad-body, .cad-covered .cad-inputbar, .cad-covered .cad-statusbar, .cad-covered .cad-panel { display:none !important; }
     .cad-cover { flex:1; overflow:auto; padding:24px; }
     .cad-cover-code { color:var(--dim); line-height:1.8; white-space:pre-wrap; }
     .cad-idlebtn { color:var(--link); }
@@ -1594,7 +1597,16 @@
         const hrefAtStart = location.href;
         const controller = new AbortController();
         pageRequest = controller;
-        const timeout = setTimeout(() => controller.abort(), 15000);
+        let timedOut = false;
+        const timeout = setTimeout(() => {
+            // Still the active request: this abort is the deadline, not a navigation cancel.
+            if (pageRequest !== controller) return;
+            timedOut = true;
+            autoPageLoading = false;
+            autoPageError = true;
+            controller.abort();
+            renderApp();
+        }, 15000);
         const isCurrent = () => pageRequest === controller && location.href === hrefAtStart && opMode === opModeOn();
         renderApp();
         fetch(fetchUrl, { credentials: 'include', signal: controller.signal })
@@ -1608,7 +1620,8 @@
             })
             .catch(err => {
                 if (!isCurrent()) return;
-                if (err && err.name === 'AbortError') return;
+                // A cancel nulls pageRequest first, so it never reaches here. A deadline abort does.
+                if (err && err.name === 'AbortError' && !timedOut) return;
                 autoPageLoading = false;
                 autoPageError = true;
                 renderApp();

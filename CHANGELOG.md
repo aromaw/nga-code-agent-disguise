@@ -16,6 +16,12 @@ Reading and replies. The disguise is usable with the keyboard, and a reply is po
 - `togglekey` changes the disguise shortcut. `Esc` covers the screen with a static example. `compact` shortens the chrome.
 - jsdom tests and saved HTML fixtures for extraction, commands, keys, board ids, and reply payloads.
 
+### Fixed
+
+- The Esc cover hides the thread, prompt, and reply panel inside the shell wrapper.
+- That wrapper is a full-height column, so a long thread scrolls and the prompt stays on screen.
+- A next-page fetch that hits the 15s deadline shows the retry state instead of staying on "Loading".
+
 ### Changed
 
 - Version 3.0.0. `@author` and `@namespace` are this repository. `@updateURL` and `@downloadURL` point at `main`.

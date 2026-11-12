@@ -15,7 +15,11 @@ function load(html, url, values = {}) {
     const gm = { cad_autopage: false, ...values };
     window.GM_getValue = (key, fallback) => (Object.prototype.hasOwnProperty.call(gm, key) ? gm[key] : fallback);
     window.GM_setValue = (key, value) => { gm[key] = value; };
-    window.GM_addStyle = () => {};
+    window.GM_addStyle = (css) => {
+        const style = window.document.createElement('style');
+        style.textContent = css;
+        (window.document.head || window.document.documentElement).appendChild(style);
+    };
     window.__CAD_TEST = true;
     window.fetch = async (input) => {
         const href = String(input && input.url ? input.url : input);
@@ -307,4 +311,64 @@ test('reading: links, per-post expand, image toggle, help panel and real status'
     assert.ok(panel);
     assert.match(panel.textContent, /quote <floor>/);
     assert.equal(document.querySelector('#cad__body').textContent.includes('quote <floor>'), false);
+});
+
+test('the shell scrolls inside a column and the cover hides that column', async () => {
+    const { cad, document, window } = load(threadHtml, 'https://bbs.nga.cn/read.php?tid=9&page=2', { cad_on: true });
+    cad.boot();
+    const app = document.querySelector('.cad-app');
+    const body = document.querySelector('.cad-body');
+    const input = document.querySelector('.cad-inputbar');
+    const status = document.querySelector('.cad-statusbar');
+    assert.equal(window.getComputedStyle(app).display, 'flex');
+    assert.equal(window.getComputedStyle(app).flexDirection, 'column');
+    assert.notEqual(window.getComputedStyle(body).display, 'none');
+    assert.match(body.textContent, /alpha/);
+    await cad.runCmd('pause');
+    assert.ok(document.querySelector('#cad__root').classList.contains('cad-covered'));
+    assert.equal(window.getComputedStyle(body).display, 'none');
+    assert.equal(window.getComputedStyle(input).display, 'none');
+    assert.equal(window.getComputedStyle(status).display, 'none');
+    const cover = document.querySelector('.cad-cover');
+    assert.ok(cover);
+    assert.notEqual(window.getComputedStyle(cover).display, 'none');
+    assert.match(cover.textContent, /Static example/);
+    assert.match(body.textContent, /alpha/);
+});
+
+test('a timed-out next page leaves a retry instead of a permanent spinner', async () => {
+    const loaded = load(threadHtml, 'https://bbs.nga.cn/read.php?tid=9&page=2', { cad_on: true, cad_autopage: true });
+    const { window, document, cad } = loaded;
+    let fetches = 0;
+    const realSetTimeout = window.setTimeout.bind(window);
+    window.setTimeout = (fn, ms, ...args) => realSetTimeout(fn, ms === 15000 ? 0 : ms, ...args);
+    window.fetch = (input, opts) => {
+        const href = String(input && input.url ? input.url : input);
+        if (href.includes('nuke.php')) {
+            return Promise.resolve({
+                ok: true,
+                status: 200,
+                headers: { get: () => 'application/json' },
+                json: async () => ({ data: [{ ipLoc: 'local' }] }),
+                arrayBuffer: async () => new Uint8Array([123, 125]).buffer,
+            });
+        }
+        fetches += 1;
+        return new Promise((resolve, reject) => {
+            const signal = opts && opts.signal;
+            if (signal) signal.addEventListener('abort', () => {
+                const err = new Error('aborted');
+                err.name = 'AbortError';
+                reject(err);
+            });
+        });
+    };
+    cad.boot();
+    await new Promise(resolve => realSetTimeout(resolve, 30));
+    assert.equal(fetches, 1);
+    assert.match(document.body.textContent, /Could not load the next page/);
+    assert.equal(document.body.textContent.includes('Loading the next page'), false);
+    [...document.querySelectorAll('button')].find(button => /Could not load the next page/.test(button.textContent)).click();
+    await new Promise(resolve => realSetTimeout(resolve, 30));
+    assert.equal(fetches, 2);
 });
