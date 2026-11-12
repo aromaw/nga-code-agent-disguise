@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NGA Code Agent Disguise
 // @namespace    https://github.com/aromaw/nga-code-agent-disguise
-// @version      4.1.2
+// @version      4.1.3
 // @description  Disguise NGA forum pages as a Claude Code / Codex CLI session. Backtick toggles outside text fields, /help lists commands, and reply/quote post through the site's own form after a confirm step.
 // @author       aromaw
 // @match        *://bbs.nga.cn/*
@@ -20,7 +20,7 @@
     'use strict';
 
     const TEST = typeof globalThis !== 'undefined' && !!globalThis.__CAD_TEST;
-    const VERSION = '4.1.2';
+    const VERSION = '4.1.3';
     const POST_PREVIEW_LINES = 14;
 
     /* ================= settings ================= */
@@ -410,7 +410,27 @@
     let savedThreads = GM_getValue('cad_threads', []);
     const locCache = GM_getValue('cad_loc_cache', {});
     const nameCache = GM_getValue('cad_name_cache', {});
-    let favorCache = GM_getValue('cad_fav_cache', { at: 0, topics: [] });
+    const nameSources = Object.create(null);
+    const FAVOR_CACHE_VER = 2;
+    function titleLooksGarbled(t) {
+        const s = String(t || '');
+        if (!s) return false;
+        // UTF-8 decode of GBK Chinese leaves U+FFFD, and 录 (GBK C2 BC) becomes U+00BC (¼).
+        if (/\uFFFD/.test(s)) return true;
+        if (/\u00BC/.test(s) && !/[\u4e00-\u9fff]/.test(s)) return true;
+        return false;
+    }
+    function favorTopicsOk(topics) {
+        return Array.isArray(topics) && !topics.some(t => t && titleLooksGarbled(t.title));
+    }
+    function readFavorCache() {
+        const raw = GM_getValue('cad_fav_cache', null);
+        if (!raw || typeof raw !== 'object') return { at: 0, topics: [], v: FAVOR_CACHE_VER };
+        const topics = Array.isArray(raw.topics) ? raw.topics : [];
+        if (!favorTopicsOk(topics)) return { at: 0, topics: [], v: FAVOR_CACHE_VER };
+        return { at: raw.at || 0, topics, v: raw.v || FAVOR_CACHE_VER };
+    }
+    let favorCache = readFavorCache();
     let favorPending = false;
     let realTitle = '';
     let origIcon = null;
@@ -923,10 +943,7 @@
                 const decoded = decodeUuname(u.uuname);
                 const name = (decoded && !isUidLabel(decoded) ? decoded : '') || (u.username || u.nickname || u.name);
                 const uid = u.uid || k;
-                if (uid && name && !isUidLabel(name)) {
-                    userNameMap[String(uid)] = cleanAuthorName(name);
-                    nameCache[String(uid)] = userNameMap[String(uid)];
-                }
+                rememberName(uid, name, 'page-userinfo');
             });
         } catch (err) { /* live object may be missing in tests */ }
     }
@@ -934,34 +951,55 @@
     function ingestHydratedAuthors(doc) {
         doc = doc || document;
         let added = false;
-        doc.querySelectorAll('a[id^="postauthor"], a.author, a.userlink, td.c1 a[href*="uid="], a[name="uid"]').forEach(a => {
+        doc.querySelectorAll('a[id^="postauthor"], a.author, a.userlink, td.c1 a[href*="uid="], td.c3 a[href*="uid="], td.c4 a[href*="uid="], .quote a[href*="uid="], a[name="uid"]').forEach(a => {
             const href = a.getAttribute('href') || '';
             const uid = (href.match(/uid=(\d+)/) || [])[1] || '';
             const name = cleanAuthorName(a.textContent);
-            if (uid && name && !isUidLabel(name) && userNameMap[uid] !== name) {
-                userNameMap[uid] = name;
-                nameCache[uid] = name;
-                added = true;
-            }
+            if (rememberName(uid, name, 'page-dom')) added = true;
         });
-        if (added) {
-            try { GM_setValue('cad_name_cache', nameCache); } catch (err) { /* ignore */ }
-        }
         return added;
+    }
+
+    function sanitizeJsonText(raw) {
+        // NGA inline JSON sometimes has raw newlines or tabs inside string values
+        // (signatures, honor), which JSON.parse rejects.
+        const s = String(raw || '');
+        let out = '';
+        let inStr = false;
+        let esc = false;
+        for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            const code = c.charCodeAt(0);
+            if (inStr) {
+                if (esc) { out += c; esc = false; continue; }
+                if (c === '\\') { out += c; esc = true; continue; }
+                if (c === '"') { out += c; inStr = false; continue; }
+                if (c === '\n') { out += '\\n'; continue; }
+                if (c === '\r') { out += '\\r'; continue; }
+                if (c === '\t') { out += '\\t'; continue; }
+                if (code < 32) { out += '\\u' + code.toString(16).padStart(4, '0'); continue; }
+                out += c;
+            } else {
+                if (c === '"') inStr = true;
+                out += c;
+            }
+        }
+        return out;
     }
 
     function parseUserInfoMap(doc) {
         doc = doc || document;
         const map = Object.create(null);
-        const take = (uid, name) => {
+        const take = (uid, name, source) => {
             const id = String(uid || '').replace(/\D+/g, '');
             const n = cleanAuthorName(name);
             if (!id || !n || isUidLabel(n)) return;
             map[id] = n;
+            rememberName(id, n, source || 'page-userinfo');
         };
         const tryJson = raw => {
             try {
-                return JSON.parse(String(raw).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' '));
+                return JSON.parse(sanitizeJsonText(raw));
             } catch (err) { return null; }
         };
         const extractBalanced = (src, from) => {
@@ -994,20 +1032,20 @@
                     const u = data[k];
                     if (u && typeof u === 'object') {
                         const decoded = decodeUuname(u.uuname);
-                        take(u.uid || k, decoded || u.username || u.nickname || u.name);
+                        take(u.uid || k, decoded || u.username || u.nickname || u.name, 'page-userinfo');
                     }
                 });
             }
             const ucp = src.match(/__UCPUSER\s*=\s*(\{[\s\S]*?\})\s*;/);
             if (ucp) {
                 const data = tryJson(ucp[1]);
-                if (data) take(data.uid, data.username || data.nickname || data.name);
+                if (data) take(data.uid, data.username || data.nickname || data.name || decodeUuname(data.uuname), 'page-userinfo');
             }
         }
         (doc || document).querySelectorAll('a[href*="uid="], a.userlink, a.author, [id^="postauthor"]').forEach(a => {
             const href = a.getAttribute('href') || '';
             const uid = (href.match(/uid=(\d+)/) || [])[1] || '';
-            take(uid, a.textContent);
+            take(uid, a.textContent, 'page-dom');
         });
         return map;
     }
@@ -1085,6 +1123,7 @@
             if (t.title) return Boolean(t.tid || t.href);
             return Boolean(t.tid);
         });
+        ingestHydratedAuthors(doc);
         return { kind: 'topics', board, topics };
     }
 
@@ -1451,7 +1490,7 @@
         const fromPage = (document.querySelector('#m_threads') && /favor=/.test(location.search || location.href))
             ? ((extractTopics() || {}).topics || [])
             : [];
-        const cached = (favorCache && Array.isArray(favorCache.topics)) ? favorCache.topics : [];
+        const cached = (favorCache && favorTopicsOk(favorCache.topics)) ? favorCache.topics : [];
         return uniqueThreads([savedThreads, fromPage, cached]);
     }
 
@@ -1469,20 +1508,31 @@
         return uniqueThreads([sidebarFavorites(), sidebarRecent()]);
     }
 
+    function applyFavorDoc(doc, url) {
+        const data = extractTopics(doc, url);
+        const topics = ((data && data.topics) || []).map(t => ({ tid: t.tid, title: t.title, href: t.href, fid: t.fid || '' }));
+        if (!favorTopicsOk(topics)) {
+            // Decoded body still looks garbled: keep the previous good cache, or stay empty.
+            return topics;
+        }
+        favorCache = { at: Date.now(), topics, v: FAVOR_CACHE_VER };
+        try { GM_setValue('cad_fav_cache', favorCache); } catch (err) { /* ignore */ }
+        return topics;
+    }
+
     function ensureFavs() {
         if (TEST) return;
-        const fresh = favorCache && favorCache.at && (Date.now() - favorCache.at < 5 * 60 * 1000) && Array.isArray(favorCache.topics);
+        favorCache = readFavorCache();
+        const fresh = favorCache && favorCache.at && (Date.now() - favorCache.at < 5 * 60 * 1000) && favorTopicsOk(favorCache.topics);
         if (fresh || favorPending) return;
         favorPending = true;
         const host = location.host || 'bbs.nga.cn';
-        fetch((location.protocol || 'https:') + '//' + host + '/thread.php?favor=1', { credentials: 'include', method: 'GET' })
+        const favUrl = (location.protocol || 'https:') + '//' + host + '/thread.php?favor=1';
+        fetch(favUrl, { credentials: 'include', method: 'GET' })
             .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return decodeRes(r); })
             .then(txt => {
                 const doc = new DOMParser().parseFromString(txt, 'text/html');
-                const data = extractTopics(doc, (location.origin || ('https://' + host)) + '/thread.php?favor=1');
-                const topics = ((data && data.topics) || []).map(t => ({ tid: t.tid, title: t.title, href: t.href, fid: t.fid || '' }));
-                favorCache = { at: Date.now(), topics };
-                GM_setValue('cad_fav_cache', favorCache);
+                applyFavorDoc(doc, (location.origin || ('https://' + host)) + '/thread.php?favor=1');
                 if (store.on && !covered) renderApp();
             })
             .catch(() => {})
@@ -1537,15 +1587,24 @@
         return walkUcpName(data, 0);
     }
 
-    function rememberName(uid, name) {
+    function rememberName(uid, name, source) {
         const id = String(uid || '');
         const n = cleanAuthorName(name);
         if (!id || !n || isUidLabel(n)) return false;
+        const prev = nameSources[id];
+        const rank = { 'page-userinfo': 3, 'page-dom': 3, 'cache': 2, 'ucp': 1 };
+        const incoming = rank[source] || 0;
+        const existing = rank[prev] || 0;
+        // Do not replace a real page name with a weaker source.
+        if (userNameMap[id] && !isUidLabel(userNameMap[id]) && incoming < existing) return false;
         userNameMap[id] = n;
         nameCache[id] = n;
+        if (source && (incoming > existing || !nameSources[id])) nameSources[id] = source;
         const keys = Object.keys(nameCache);
-        if (keys.length > 800) keys.slice(0, 400).forEach(k => delete nameCache[k]);
-        GM_setValue('cad_name_cache', nameCache);
+        if (keys.length > 800) {
+            keys.slice(0, 400).forEach(k => { delete nameCache[k]; delete nameSources[k]; });
+        }
+        try { GM_setValue('cad_name_cache', nameCache); } catch (err) { /* ignore */ }
         return true;
     }
 
@@ -1574,6 +1633,7 @@
     const ucpInflight = Object.create(null);
     const ucpQueue = [];
     let ucpBusy = false;
+    let ucpGaveUp = false;
     const UCP_GAP = TEST ? 0 : 300;
 
     function rememberLoc(id, loc) {
@@ -1590,6 +1650,7 @@
             .then(r => {
                 report.status = r.status;
                 report.contentType = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
+                if (r.status === 503) ucpGaveUp = true;
                 return decodeRes(r);
             })
             .then(text => {
@@ -1614,17 +1675,26 @@
 
     function actuallyFetchUcp(uid) {
         const id = String(uid || '');
+        if (ucpGaveUp) return Promise.resolve(lastNameProbe ? { report: lastNameProbe, blocked: true } : null);
         const urls = ucpUrls(id);
         let i = 0;
         const step = () => {
+            if (ucpGaveUp) return Promise.resolve({ report: lastNameProbe, blocked: true });
             if (i >= urls.length) return Promise.resolve(null);
             const url = urls[i++];
             return probeUcpUrl(id, url).then(out => {
+                const status = out && out.report && out.report.status;
+                // The live ucp API returns 503 / text/html with an empty body.
+                // Stop every further ucp call in this page session after the first 503.
+                if (status === 503) {
+                    ucpGaveUp = true;
+                    return { loc: '', name: '', report: out.report, blocked: true };
+                }
                 if (out && out.data) {
                     const loc = (out.report && out.report.loc) || locFromUcpData(out.data);
                     const name = (out.report && out.report.name) || nameFromUcpData(out.data);
                     if (loc) rememberLoc(id, loc);
-                    if (name) rememberName(id, name);
+                    if (name) rememberName(id, name, 'ucp');
                     return { loc, name, report: out.report };
                 }
                 // Parsed failure or HTTP failure: try the next official-style URL.
@@ -1637,6 +1707,7 @@
     function fetchUcp(uid) {
         const id = String(uid || '');
         if (!id || !/^\d+$/.test(id)) return Promise.resolve(null);
+        if (ucpGaveUp) return Promise.resolve(null);
         if (ucpInflight[id]) return ucpInflight[id];
         const req = new Promise(resolve => {
             ucpQueue.push({ id, resolve });
@@ -1647,6 +1718,14 @@
     }
 
     function pumpUcp() {
+        if (ucpGaveUp && ucpQueue.length) {
+            while (ucpQueue.length) {
+                const item = ucpQueue.shift();
+                try { item.resolve(null); } catch (err) { /* ignore */ }
+            }
+            ucpBusy = false;
+            return;
+        }
         if (ucpBusy || !ucpQueue.length) return;
         ucpBusy = true;
         const { id, resolve } = ucpQueue.shift();
@@ -1668,8 +1747,14 @@
     function applyCachedNames(posts) {
         (posts || []).forEach(p => {
             if (!p || !p.uid) return;
-            if (nameCache[p.uid]) userNameMap[p.uid] = nameCache[p.uid];
-            if (p.name && !isUidLabel(p.name)) return;
+            if (nameCache[p.uid] && !isUidLabel(nameCache[p.uid])) {
+                userNameMap[p.uid] = nameCache[p.uid];
+                if (!nameSources[p.uid]) nameSources[p.uid] = 'cache';
+            }
+            if (p.name && !isUidLabel(p.name)) {
+                if (!nameSources[p.uid]) nameSources[p.uid] = 'page-dom';
+                return;
+            }
             const n = userNameMap[p.uid] || nameCache[p.uid];
             if (n && !isUidLabel(n)) p.name = n;
         });
@@ -2659,6 +2744,10 @@
         renderApp();
     }
 
+    function sourceOfName(uid) {
+        return nameSources[String(uid)] || (nameCache[String(uid)] ? 'cache' : (userNameMap[String(uid)] ? 'page-dom' : ''));
+    }
+
     async function cmdDebugNames() {
         if (lastData && lastData.kind === 'posts') {
             applyCachedNames(lastData.posts);
@@ -2681,20 +2770,34 @@
             line(esc(resolved.length + ' resolved, ' + unresolved.length + ' unresolved, ' + authors.length + ' unique authors on ' + posts.length + ' posts'), 'cad-faint'),
         ];
         if (resolved.length) {
-            const sample = resolved.slice(0, 8).map(a => a.name + ' (' + a.uid + ')').join(', ');
-            lines.push(line(esc('resolved: ' + sample + (resolved.length > 8 ? '…' : '')), 'cad-faint'));
+            const sample = resolved.slice(0, 12).map(a => {
+                const src = sourceOfName(a.uid) || 'unknown';
+                return a.name + ' (' + a.uid + ', ' + src + ')';
+            }).join(', ');
+            lines.push(line(esc('resolved: ' + sample + (resolved.length > 12 ? '…' : '')), 'cad-faint'));
         }
         if (!unresolved.length) {
-            lines.push(line('Every loaded author already has a real name.', 'cad-faint'));
+            lines.push(line('Every loaded author already has a real name. Sources are on-page (userInfo / DOM); ucp was not called.', 'cad-faint'));
             panel = { title: 'debug names', html: lines.join('') };
             renderApp();
             return;
         }
         const first = unresolved[0];
         lines.push(line(esc('first unresolved: uid ' + first.uid + ' · floors ' + first.floors.join(', ') + ' · display ' + (first.name || '—')), 'cad-faint'));
+        if (ucpGaveUp) {
+            lines.push(line('ucp skipped: a previous request in this session returned HTTP 503. Names come from the page only.', 'cad-faint'));
+            if (lastNameProbe) {
+                lines.push(line(esc('last ucp: HTTP ' + (lastNameProbe.status || '—') + ' ' + (lastNameProbe.url || '')), 'cad-faint'));
+                lines.push(line('decoded body (first 300 characters):', 'cad-faint'));
+                lines.push('<pre class="cad-preview">' + esc(lastNameProbe.bodyHead || '(empty)') + '</pre>');
+            }
+            panel = { title: 'debug names', html: lines.join('') };
+            renderApp();
+            return;
+        }
         panel = { title: 'debug names', html: lines.join('') + line('Probing NGA ucp…', 'cad-faint') };
         renderApp();
-        const result = await actuallyFetchUcp(first.uid);
+        const result = await fetchUcp(first.uid);
         const probe = (result && result.report) || lastNameProbe;
         if (!probe) {
             lines.push(line('No probe result. The fetch may have been blocked.', 'cad-faint'));
@@ -2713,8 +2816,11 @@
             if (result && result.name) {
                 applyCachedNames(lastData && lastData.posts);
                 applyCachedNames(lastData && lastData.hot);
-                lines.push(line(esc('applied name: ' + result.name), 'cad-faint'));
+                lines.push(line(esc('applied name: ' + result.name + ' (ucp)'), 'cad-faint'));
                 scheduleLocRender();
+            }
+            if (result && result.blocked) {
+                lines.push(line('ucp is now stopped for this session after HTTP 503. Further names come from the page only.', 'cad-faint'));
             }
         }
         panel = { title: 'debug names', html: lines.join('') };
@@ -3177,7 +3283,9 @@
         const trials = [];
         const add = cs => { if (cs && trials.indexOf(cs) < 0) trials.push(cs); };
         const declared = normalizeCharset(hint);
-        // NGA serves GBK. Prefer it unless a UTF-8 hint decodes cleanly with no replacements.
+        // NGA serves GBK. Prefer it when UTF-8 is full of replacement glyphs.
+        // A clean UTF-8 decode must win a 0-replacement tie: GBK can "decode"
+        // almost any byte sequence without U+FFFD, including real UTF-8.
         add('gbk');
         add('gb18030');
         if (declared && declared !== 'gbk') add(declared);
@@ -3187,8 +3295,10 @@
             try {
                 const t = textDecoder(cs, { fatal: false }).decode(raw);
                 const bad = (t.match(/\uFFFD/g) || []).length;
-                // Prefer fewer replacement glyphs, then prefer gbk on a tie.
-                const score = (-bad * 1000) + (cs === 'gbk' || cs === 'gb18030' ? 2 : 0) + (cs === declared ? 1 : 0);
+                const score = (-bad * 10000)
+                    + (bad === 0 && cs === 'utf-8' ? 500 : 0)
+                    + ((cs === 'gbk' || cs === 'gb18030') ? 2 : 0)
+                    + (cs === declared ? 1 : 0);
                 if (score > bestScore) { best = t; bestScore = score; bestCs = cs; }
             } catch (err) { /* try next */ }
         }
@@ -4145,6 +4255,12 @@
             ingestHydratedAuthors,
             applyCachedNames,
             nameCache,
+            get nameSources() { return nameSources; },
+            get ucpGaveUp() { return ucpGaveUp; },
+            titleLooksGarbled,
+            applyFavorDoc,
+            readFavorCache,
+            sanitizeJsonText,
             formatUnix,
             sidebarFavorites,
             sidebarRecent,

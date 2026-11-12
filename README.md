@@ -81,6 +81,6 @@ npm test          # jsdom: disguise.test.js, fixes.test.js, dumps.test.js (dumps
 npm run shots     # Playwright screenshots against the dumps, written to /workspace/nga-dev-shots
 ```
 
-Version 4.1.2 decodes every NGA fetch as GBK (favorite titles were replacement glyphs; ucp JSON may be prefixed with `window.script_muti_get_var_store=`). A hidden `debug names` command prints the first unresolved uid's live ucp response. See [CHANGELOG.md](CHANGELOG.md).
+Version 4.1.3 takes author names from the page (`userInfo.setAll` / `uuname`, author and quote links) and only falls back to ucp until the first HTTP 503. Favorite titles drop a garbled cached list and decode GBK or UTF-8 without replacement glyphs. `debug names` prints each name's source. See [CHANGELOG.md](CHANGELOG.md).
 
 `npm test` runs `node --test tests/disguise.test.js` with jsdom and `tests/fixtures/`. The tests do not contact NGA. Bookmark, vote, new-thread, and notification calls were not exercised against the live site.

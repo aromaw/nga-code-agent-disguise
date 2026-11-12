@@ -101,6 +101,8 @@ maybe('real dumps: board name, reply counts, sidebar and favorites', () => {
     assert.equal(favData.kind, 'topics');
     assert.equal(favData.topics.length, 6);
     assert.ok(favData.topics.every(t => t.title && t.tid));
+    assert.ok(favData.topics.every(t => !/\uFFFD/.test(t.title)), 'favorite titles must not be replacement glyphs');
+    assert.ok(favData.topics.some(t => /[\u4e00-\u9fff]/.test(t.title)), 'favorite titles include readable CJK');
     fav.cad.boot();
     const favSide = fav.document.querySelector('.cad-side');
     const favLinks = [...favSide.querySelectorAll('a')].filter(a => /tid=\d+/.test(a.getAttribute('href') || ''));
@@ -211,6 +213,7 @@ maybe('real dumps: sidebar labels real favorites and recent threads separately',
     const favs = fav.cad.sidebarFavorites();
     assert.ok(favs.length >= 6);
     assert.ok(favs.every(t => t.tid && t.title));
+    assert.ok(favs.every(t => !/\uFFFD/.test(t.title)));
     const favTids = new Set(favs.map(t => t.tid));
     for (const t of fav.cad.sidebarRecent()) {
         assert.equal(favTids.has(t.tid), false);

@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.1.3
+
+Author names on live read.php pages are stored as `UID:…` in both `commonui.userInfo.setAll` and `#postauthorN`. The ucp API that 4.1.2 used as a fallback returns HTTP 503. Favorite titles were still garbled because a previous GBK-as-UTF-8 cache (`[��¼��]…`) was kept.
+
+### Fixed
+
+- Names are taken from the page first: `userInfo.setAll` (including hex `uuname`, and JSON that contains raw newlines), quote and author `userlink`s, and board/favor author links. Those names are cached. The ucp GET is only a last fallback; after the first HTTP 503 in a session it is not called again.
+- `debug names` prints the source of each resolved name (`page-userinfo`, `page-dom`, `cache`, or `ucp`) and reports when ucp has been stopped after a 503.
+- Favorite titles are decoded with a UTF-8/GBK scorer that keeps a clean UTF-8 body and still prefers GBK when UTF-8 is full of replacement glyphs. A cached favorites list that contains U+FFFD or the `¼` mojibake from GBK `录` is dropped and refetched, and a garbled decode is not written back.
+
 ## 4.1.2
 
 Favorite titles and author names were garbled or missing because NGA serves GBK, and some fetches decoded the body as UTF-8.

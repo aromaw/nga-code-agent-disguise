@@ -549,3 +549,224 @@ test('debug names is hidden from the slash menu', () => {
     assert.equal(/const CMDS = \[[^\]]*debug names/.test(src), false);
     assert.match(src, /m === 'debug names'/);
 });
+
+
+// [记录氵]关于我在2024年遇到的那些奇人异事  — GBK bytes, including the 录 (C2 BC) that becomes ¼ if decoded as UTF-8
+const FAV_BRACKET_TITLE = '[记录氵]关于我在2024年遇到的那些奇人异事';
+const FAV_BRACKET_GBK = '5bbcc7c2bce3df5db9d8d3daced2d4da32303234c4ead3f6b5bdb5c4c4c7d0a9c6e6c8cbd2eccac2';
+const FAV_BRACKET_UTF8 = '5be8aeb0e5bd95e6b0b55de585b3e4ba8ee68891e59ca832303234e5b9b4e98187e588b0e79a84e982a3e4ba9be5a587e4babae5bc82e4ba8b';
+
+function favorPage(title, tid, uid, author) {
+    return `<!doctype html><html><head>
+<meta http-equiv="Content-Type" content="text/html; charset=GBK">
+<title>收藏的主题 - NGA</title>
+</head><body>
+<div id="m_threads">
+<table class="forumbox">
+<tbody>
+<tr class="row1 topicrow">
+  <td class="c1"><a id="t_rc1_0" class="replies" href="/read.php?tid=${tid}">3</a></td>
+  <td class="c2"><a id="t_tt1_0" class="topic" href="/read.php?tid=${tid}">${title}</a></td>
+  <td class="c3"><a href="/nuke.php?func=ucp&amp;uid=${uid}" class="author" id="t_ta1_0"><b class="block_txt" name="nameinit">${author.slice(0, 1)}</b>${author.slice(1)}</a></td>
+</tr>
+</tbody>
+</table>
+</div>
+</body></html>`;
+}
+
+function pageWithSetAllAndQuote() {
+    // uuname 416c696365 is UTF-8 hex for "Alice". A raw newline sits in the first
+    // user's signature so a strict JSON.parse of setAll would fail.
+    return `<!doctype html><html><head><title>t - NGA</title></head><body>
+<script type="text/plain">
+//userinfostart
+commonui.userInfo.setAll(   {"101":{"uid":101,"username":"UID:101","uuname":"416c696365","nickname":null,"signature":"hello
+world","bit_data":1},"202":{"uid":202,"username":"UID:202","uuname":"","nickname":null,"signature":null},"303":{"uid":303,"username":"UID:303","uuname":null,"nickname":null}} )
+//userinfoend
+</script>
+<div id="m_posts">
+<table class="forumbox postbox"><tbody><tr>
+<td class="c1"><a href="/nuke.php?func=ucp&amp;uid=101" id="postauthor0" class="userlink author">UID:101</a></td>
+<td class="c2" id="postcontainer0"><a name="l0"></a>
+<div class="postcontent" id="postcontent0">op</div>
+</td>
+</tr></tbody></table>
+<table class="forumbox postbox"><tbody><tr>
+<td class="c1"><a href="/nuke.php?func=ucp&amp;uid=202" id="postauthor1" class="userlink author">UID:202</a></td>
+<td class="c2" id="postcontainer1"><a name="l1"></a>
+<div class="postcontent" id="postcontent1">
+<div class="quote"><a href="/nuke.php?func=ucp&amp;uid=101" class="userlink b">[<b class="block_txt" name="nameinit">A</b>lice]</a> <span class="xtxt silver">2026-11-01 10:00</span><br>quoted alice</div>
+hi from two
+</div>
+</td>
+</tr></tbody></table>
+<table class="forumbox postbox"><tbody><tr>
+<td class="c1"><a href="/nuke.php?func=ucp&amp;uid=303" id="postauthor2" class="userlink author">UID:303</a></td>
+<td class="c2" id="postcontainer2"><a name="l2"></a>
+<div class="postcontent" id="postcontent2">
+<div class="quote"><a href="/nuke.php?func=ucp&amp;uid=202" class="userlink b">[<b class="block_txt" name="nameinit">B</b>ob]</a> <span class="xtxt silver">2026-11-01 11:00</span><br>quoted bob</div>
+no page name for 303
+</div>
+</td>
+</tr></tbody></table>
+</div>
+</body></html>`;
+}
+
+test('names come from setAll uuname and quote links first, and debug names shows each source', async () => {
+    const fetches = [];
+    const { cad, window, document } = load(pageWithSetAllAndQuote(), 'https://bbs.nga.cn/read.php?tid=9&page=2', { cad_on: true });
+    window.fetch = async (input, init) => {
+        const href = String(input && input.url ? input.url : input);
+        fetches.push(href);
+        return {
+            ok: false,
+            status: 503,
+            url: href,
+            headers: { get: (n) => (String(n).toLowerCase() === 'content-type' ? 'text/html' : null) },
+            arrayBuffer: async () => new ArrayBuffer(0),
+        };
+    };
+    const fromScript = cad.parseUserInfoMap(document);
+    assert.equal(fromScript['101'], 'Alice');
+    assert.equal(fromScript['202'], 'Bob');
+    assert.equal(fromScript['303'], undefined);
+
+    const data = cad.extract();
+    const byUid = Object.fromEntries(data.posts.map(p => [p.uid, p.name]));
+    assert.equal(byUid['101'], 'Alice');
+    assert.equal(byUid['202'], 'Bob');
+    assert.equal(cad.isUidLabel(byUid['303']), true);
+    assert.equal(cad.nameSources['101'], 'page-userinfo');
+    assert.equal(cad.nameSources['202'], 'page-dom');
+
+    cad.boot();
+    await new Promise(r => setTimeout(r, 80));
+    await cad.runCmd('debug names');
+    await new Promise(r => setTimeout(r, 40));
+    const text = document.body.textContent;
+    assert.match(text, /2 resolved/);
+    assert.match(text, /1 unresolved/);
+    assert.match(text, /Alice \(101, page-userinfo\)/);
+    assert.match(text, /Bob \(202, page-dom\)/);
+    assert.match(text, /303/);
+    // Ucp may be called for IP location, but a 503 stops the rest of the session
+    // and must not overwrite the on-page names.
+    if (fetches.length) {
+        assert.equal(cad.ucpGaveUp, true);
+        const uids = [...new Set(fetches.map(u => (u.match(/uid=(\d+)/) || [])[1]).filter(Boolean))];
+        assert.equal(uids.length, 1, 'only one uid is probed after the 503');
+    }
+    const after = cad.extract();
+    assert.equal(after.posts.find(p => p.uid === '101').name, 'Alice');
+    assert.equal(after.posts.find(p => p.uid === '202').name, 'Bob');
+    assert.equal(cad.nameSources['101'], 'page-userinfo');
+    assert.equal(cad.nameSources['202'], 'page-dom');
+});
+
+test('a 503 from ucp stops every further ucp call in that session', async () => {
+    const html = `<!doctype html><html><head><title>t - NGA</title></head><body>
+<div id="m_posts">
+<table class="forumbox postbox"><tbody><tr>
+<td class="c1"><a href="/nuke.php?func=ucp&amp;uid=11" id="postauthor0">UID:11</a></td>
+<td class="c2" id="postcontainer0"><a name="l0"></a><div class="postcontent" id="postcontent0">a</div></td>
+</tr></tbody></table>
+<table class="forumbox postbox"><tbody><tr>
+<td class="c1"><a href="/nuke.php?func=ucp&amp;uid=22" id="postauthor1">UID:22</a></td>
+<td class="c2" id="postcontainer1"><a name="l1"></a><div class="postcontent" id="postcontent1">b</div></td>
+</tr></tbody></table>
+</div>
+</body></html>`;
+    const { cad, window } = load(html, 'https://bbs.nga.cn/read.php?tid=9', { cad_on: true });
+    const fetches = [];
+    window.fetch = async (input, init) => {
+        const href = String(input && input.url ? input.url : input);
+        fetches.push({ href, method: ((init && init.method) || 'GET') });
+        assert.equal(((init && init.method) || 'GET').toUpperCase(), 'GET');
+        return {
+            ok: false,
+            status: 503,
+            url: href,
+            headers: { get: (n) => (String(n).toLowerCase() === 'content-type' ? 'text/html' : null) },
+            text: async () => { throw new Error('should not call text()'); },
+            arrayBuffer: async () => new ArrayBuffer(0),
+        };
+    };
+    cad.boot();
+    await new Promise(r => setTimeout(r, 80));
+    cad.ensureLocs();
+    cad.ensureLocs();
+    await new Promise(r => setTimeout(r, 80));
+    assert.ok(fetches.length >= 1, 'at least the first 503 is observed');
+    // After the first 503, no other uid and no later URL variant is requested.
+    const first = fetches[0].href;
+    assert.match(first, /__lib=ucp/);
+    assert.equal(fetches.length, 1, 'stop after the first 503, including other URL variants');
+    assert.equal(cad.ucpGaveUp, true);
+    const n11 = fetches.filter(f => /uid=11/.test(f.href)).length;
+    const n22 = fetches.filter(f => /uid=22/.test(f.href)).length;
+    assert.equal(n11 + n22, 1);
+    assert.equal(n11 === 1 || n22 === 1, true);
+});
+
+test('sanitizeJsonText lets setAll survive a raw newline inside a string', () => {
+    const { cad } = load(emptyHtml, 'https://bbs.nga.cn/read.php?tid=1');
+    const raw = '{"101":{"uid":101,"username":"UID:101","uuname":"416c696365","signature":"a\nb"}}';
+    const cleaned = cad.sanitizeJsonText(raw);
+    const data = JSON.parse(cleaned);
+    assert.equal(data['101'].signature, 'a\nb');
+    assert.equal(cad.decodeUuname(data['101'].uuname), 'Alice');
+});
+
+test('decodeBuffer keeps a clean UTF-8 title and still decodes the live GBK [记录氵] pattern', () => {
+    const { cad } = load(emptyHtml, 'https://bbs.nga.cn/thread.php?favor=1');
+    const gbk = gbkBuffer(FAV_BRACKET_GBK);
+    const asUtf8 = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(gbk));
+    assert.match(asUtf8, /\uFFFD/);
+    assert.match(asUtf8, /\u00BC/);
+    assert.equal(cad.decodeBuffer(gbk, 'gbk'), FAV_BRACKET_TITLE);
+    assert.equal(cad.decodeBuffer(gbk, 'utf-8'), FAV_BRACKET_TITLE);
+    assert.equal(cad.titleLooksGarbled(asUtf8), true);
+    assert.equal(cad.titleLooksGarbled(FAV_BRACKET_TITLE), false);
+
+    const utf8bytes = Uint8Array.from(FAV_BRACKET_UTF8.match(/../g).map(h => parseInt(h, 16))).buffer;
+    // UTF-8 bytes of real Chinese must not be forced through GBK (that produces 璁板綍…).
+    assert.equal(cad.decodeBuffer(utf8bytes, 'gbk'), FAV_BRACKET_TITLE);
+    assert.equal(cad.decodeBuffer(utf8bytes, 'utf-8'), FAV_BRACKET_TITLE);
+});
+
+test('a garbled favorites cache is dropped, and a GBK favor page is stored with readable titles', () => {
+    const garbled = '[\uFFFD\uFFFD\u00BC\uFFFD]关于我在2024年遇到的那些奇人异事';
+    const { cad, document, gm } = load(emptyHtml, 'https://bbs.nga.cn/thread.php?fid=-7', {
+        cad_on: true,
+        cad_recent: [{ tid: '111', title: 'Recent Thread A', href: '/read.php?tid=111' }],
+        cad_fav_cache: { at: Date.now(), topics: [{ tid: '43055829', title: garbled, href: '/read.php?tid=43055829' }] },
+        cad_threads: [],
+    });
+    assert.equal(cad.titleLooksGarbled(garbled), true);
+    const emptied = cad.readFavorCache();
+    assert.equal(Array.isArray(emptied.topics) && emptied.topics.length, 0);
+    assert.equal(cad.sidebarFavorites().some(t => t.tid === '43055829'), false);
+    cad.boot();
+    const sideBefore = document.querySelector('.cad-side').textContent;
+    assert.equal(sideBefore.includes('\uFFFD'), false);
+    assert.equal(sideBefore.includes('\u00BC'), false);
+
+    const html = favorPage(FAV_BRACKET_TITLE, '43055829', '99', 'BigCat');
+    const { window } = load(html, 'https://bbs.nga.cn/thread.php?favor=1');
+    const topics = cad.applyFavorDoc(window.document, 'https://bbs.nga.cn/thread.php?favor=1');
+    assert.equal(topics.length, 1);
+    assert.equal(topics[0].title, FAV_BRACKET_TITLE);
+    assert.equal(topics[0].tid, '43055829');
+    assert.equal(/\uFFFD/.test(topics[0].title), false);
+    const stored = gm.cad_fav_cache;
+    assert.equal(stored.topics[0].title, FAV_BRACKET_TITLE);
+    assert.ok(stored.v);
+
+    const favs = cad.sidebarFavorites();
+    assert.ok(favs.some(t => t.tid === '43055829' && t.title === FAV_BRACKET_TITLE));
+    // Author names on the favor page are cached for later thread views.
+    const fromFav = cad.parseUserInfoMap(window.document);
+    assert.equal(fromFav['99'] || cad.nameCache['99'], 'BigCat');
+});

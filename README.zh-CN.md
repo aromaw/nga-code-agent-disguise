@@ -81,4 +81,4 @@ npm test          # jsdom：disguise.test.js、fixes.test.js、dumps.test.js（�
 npm run shots     # 用 Playwright 对 dumps 截图，写到 /workspace/nga-dev-shots
 ```
 
-`npm test` 使用 jsdom 和 `tests/fixtures/`，不访问 NGA。4.1.2 把所有 NGA 请求按 GBK 解码（收藏标题乱码、带 `window.script_muti_get_var_store=` 前缀的 ucp JSON），并增加隐藏命令 `debug names` 用于查看未解析 uid 的真实响应。详见 [CHANGELOG.md](CHANGELOG.md)。收藏、投票、发新帖和通知没有在正式站上验证过。
+`npm test` 使用 jsdom 和 `tests/fixtures/`，不访问 NGA。4.1.3 优先从页面（`userInfo.setAll` / `uuname`、作者和引用链接）取用户名，ucp 只作后备并在首次 HTTP 503 后停止；收藏标题会丢弃乱码缓存并以正确编码解码。`debug names` 会标明每个名字的来源。详见 [CHANGELOG.md](CHANGELOG.md)。收藏、投票、发新帖和通知没有在正式站上验证过。
